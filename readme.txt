@@ -10,7 +10,7 @@ The authors declare that the minimal data set for this study cannot be shared pu
 
 Running code and analysis:
 
-The original R code used to carry out the post processed cytokine and CyTOF data has been uploaded to https://github.com/dzabran1/ICI-Aging. Once data has been obtained from Vivli, users wishing to re-analyze these data using scripts and R markdown files on GitHub should first deposit the data files into the “data” subfolder. The GitHub scripts and R markdown files should be correctly pathed to the data subfolder structure. If there are errors in running the scripts, please check if the pathing of the deposited data is in the correct sub folders.
+Once data has been obtained from Vivli, users wishing to re-analyze these data using scripts and R markdown files on GitHub should first deposit the data files into the “data” subfolder. The GitHub scripts and R markdown files should be correctly pathed to the data subfolder structure. If there are errors in running the scripts, please check if the pathing of the deposited data is in the correct sub folders.
 
 In terms of running the scripts and markdown files, any output files (i.e. rds, excel, or figures) will be pathed to the “output” folder with corresponding subfolders.
 
