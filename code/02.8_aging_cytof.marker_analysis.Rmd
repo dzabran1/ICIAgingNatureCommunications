@@ -1,0 +1,529 @@
+---
+title: "CyTOF Marker statistical analysis"
+output: html_document
+date: "2024-05-23"
+---
+
+# Set up
+
+### Libraries
+
+```{r}
+library(here)
+library(tidyverse)
+library(survminer)
+library(survival)
+library(grid)
+library(openxlsx)
+library(readxl)
+library(ggbreak) 
+library(ggplot2)
+library(ggpubr)
+library(ggrepel)
+library(svglite)
+library(rstatix)
+library(viridis)
+library(ggsci)
+library(NatParksPalettes)
+
+```
+
+### Directory pathing
+
+```{r}
+here::i_am("code/02.8_aging_cytof.marker_analysis.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+```
+
+### Source functions
+
+```{r}
+source(here("code/functions/function_boxplot.R"))
+```
+
+### Import files
+
+```{r}
+
+clinical <- readRDS(here("output/RDS files/clinical.rds"))
+
+clinical$orr.age.status <- factor(clinical$orr.age.status, 
+                                                levels = c("RO", "NRO",
+                                                           "RY", "NRY"))
+
+file_path_v1 <- here("data/CyTOF/V1_Functional_Marker_Expression.xlsx")
+cytof.marker.tb_import_v1 <- read_excel(file_path_v1)
+
+```
+
+### Special characters for graphs
+
+```{r}
+# For >= symbol in strings
+greater_than_equal <- "\u2265"
+less_than <- "\u003c"
+
+age_greater.equal_65 <- paste0("Age ",greater_than_equal,"65")
+age_greater.equal_65 <- "Aged"
+
+age_less_65 <- paste0("Age ",less_than,"65")
+age_less_65 <- "Young"
+
+```
+
+### Color palettes
+
+```{r}
+# Set up colors
+
+color_pal <- c("#15607a","#3cc4ad")
+```
+
+### Markers
+
+```{r}
+select_markers <- c("CCR7","CD45RA","CD45RO","CTLA4",
+                    "GZMB","Ki67",
+                    "LAG3","PD1","PDL1",
+                    "TBET", "TIGIT", "TIM3")
+```
+
+# Data cleaning
+
+### String and mmi change calculations
+
+```{r}
+
+# version 1 clustering
+cytof.marker.tb_v1 <- cytof.marker.tb_import_v1 %>%
+  filter(!sample_id == "15_0") %>%
+  mutate(sample_id = ifelse(sample_id == "15_0_1", "15_0", sample_id)) %>%
+  mutate(`pt id` = sub("^(\\d+)_.*", "\\1",`sample_id`)) %>%
+  mutate(`pt id` = as.numeric(`pt id`)) %>%
+  mutate(`timepoint` = sub(".*_", "\\1",`sample_id`)) %>%
+  mutate(`timepoint` = as.numeric(`timepoint`)) %>%
+  relocate(`pt id`, .before = cluster) %>%
+  rename(immune_cell = "cluster", marker = "variable", mmi = "value") 
+
+change_cytof.marker.tb_v1 <- cytof.marker.tb_v1 %>%
+  group_by(`pt id`,`immune_cell`,`marker`) %>%
+  arrange(`pt id`,`immune_cell`,`marker`,`timepoint`) %>%
+  mutate(baseline_mmi = mmi[row_number() ==1],
+         delta = mmi - mmi[row_number() == 1],
+         relative_change = (mmi - mmi[row_number() == 1])/mmi[row_number() == 1],
+         fold = mmi/mmi[row_number() == 1],
+         fold_log2 = log2(fold)) %>%
+  filter(!`timepoint` == 0) %>%
+  relocate(baseline_mmi:fold, .after = mmi) %>%
+  ungroup()
+
+```
+
+### Combining files
+
+```{r}
+
+# v1 clustering
+
+clinical_cytof.marker_tb_v1 <- clinical %>%
+  left_join(cytof.marker.tb_v1, by = "pt id") %>%
+  mutate(`blood timepoint` = case_when(timepoint == 0 ~ "baseline",
+                                       timepoint == 1 ~ "on treatment",
+                                       TRUE ~ NA_character_))
+
+clinical_cytof.change_tb_v1 <- clinical %>%
+  left_join(change_cytof.marker.tb_v1, by = "pt id") %>%
+  mutate(`blood timepoint` = case_when(timepoint == 0 ~ "baseline",
+                                       timepoint == 1 ~ "on treatment",
+                                       TRUE ~ NA_character_))
+
+```
+
+### Baseline and first on treatment
+
+```{r}
+
+
+clinical_cytof.marker_baseline_v1 <- clinical_cytof.marker_tb_v1 %>%
+  filter(timepoint == 0)
+
+clinical_cytof.marker_on.treatment_v1 <- clinical_cytof.marker_tb_v1 %>%
+  filter(timepoint == 1)
+
+```
+
+### Cytof baseline and on treatment number of patients
+
+```{r}
+clinical_cytof.marker_baseline_v1 %>%
+  ungroup() %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+clinical_cytof.marker_on.treatment_v1 %>%
+  ungroup() %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+```
+
+### Cytof cluster lists (grouped)
+
+```{r}
+
+cytof_cluster_grouped_list <- unique(clinical_cytof.marker_tb_v1$immune_cell)
+cytof_cluster_grouped_list_rmv_UA <- cytof_cluster_grouped_list[-16]
+
+```
+
+# Statistical analysis
+
+### Wilcoxon for baseline
+
+```{r}
+
+Wilcoxon.baseline.marker_mmi_age65status_v1 <- clinical_cytof.marker_baseline_v1  %>%
+  filter(!is.na(mmi)) %>%
+  filter(marker %in% select_markers) %>%
+  group_by(marker,immune_cell) %>%
+  transmute(mean_age65.older = mean(mmi[age65_status == "yes"]),
+         mean_age65.younger = mean(mmi[age65_status == "no"]),
+         std_age65.older = sd(mmi[age65_status == "yes"]),
+         std_age65.younger = sd(mmi[age65_status == "no"]),
+         pval = wilcox.test(mmi ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(marker,immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance() %>%
+  filter(pval <0.05) 
+
+```
+### Wilcoxon for on.treatment
+
+```{r}
+
+Wilcoxon.on.treatment.marker_mmi_age65status_v1 <- clinical_cytof.marker_on.treatment_v1   %>%
+  filter(!is.na(mmi)) %>%
+  filter(marker %in% select_markers) %>%
+  group_by(marker,immune_cell) %>%
+  transmute(mean_age65.older = mean(mmi[age65_status == "yes"]),
+         mean_age65.younger = mean(mmi[age65_status == "no"]),
+         std_age65.older = sd(mmi[age65_status == "yes"]),
+         std_age65.younger = sd(mmi[age65_status == "no"]),
+         pval = wilcox.test(mmi ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(marker,immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance() %>%
+  filter(pval <0.05) 
+
+```
+
+# Plots (Figure 5)
+
+### Boxplot generation for baseline/on.treatment (by immune cluster)
+Faceted plot of all significant markers for that cluster of interest
+
+```{r}
+sig.markers_by.cluster <- c(Wilcoxon.baseline.marker_mmi_age65status_v1$marker,Wilcoxon.on.treatment.marker_mmi_age65status_v1$marker) %>%
+  unique(.)
+
+baseline_plot_list <- list()
+
+on.treatment_plot_list <- list()
+
+for (i in 1:length(cytof_cluster_grouped_list_rmv_UA)) {
+  
+  sig_wilcoxon_baseline_per.cluster <- Wilcoxon.baseline.marker_mmi_age65status_v1 %>%
+    filter(immune_cell == paste(cytof_cluster_grouped_list_rmv_UA[i]))
+  
+  sig_wilcoxon_on.treatment_per.cluster <- Wilcoxon.on.treatment.marker_mmi_age65status_v1 %>%
+    filter(immune_cell == paste(cytof_cluster_grouped_list_rmv_UA[i]))
+  
+  sig.markers_by.cluster <- c(sig_wilcoxon_baseline_per.cluster$marker,sig_wilcoxon_on.treatment_per.cluster$marker) %>%
+  unique(.) 
+  
+  dataset_dummy_1 <- clinical_cytof.marker_baseline_v1 %>%
+    filter(immune_cell == paste(cytof_cluster_grouped_list_rmv_UA[i])) %>%
+    filter(marker %in% sig.markers_by.cluster)
+  
+  #dataset_dummy_1$marker <- factor(dataset_dummy_1$marker, levels =c("CCR7","CD45RA","CD45RO",
+   #                 "GZMB","KI67","TBET",
+    #                "CTLA4","LAG3","PD1","PDL1",
+     #               "TIGIT", "TIM3"))
+  
+  dataset_dummy_2 <- clinical_cytof.marker_on.treatment_v1 %>%
+    filter(immune_cell == paste(cytof_cluster_grouped_list_rmv_UA[i])) %>%
+    filter(marker %in% sig.markers_by.cluster)
+  
+  #dataset_dummy_2$marker <- factor(dataset_dummy_2$marker, levels =c("CCR7","CD45RA","CD45RO",
+                    #"GZMB","KI67","TBET",
+                    #"CTLA4","LAG3","PD1","PDL1",
+                    #"TIGIT", "TIM3"))
+  
+  if (length(sig.markers_by.cluster) > 0) {
+  baseline_plot <- ggplot(dataset_dummy_1, aes(x= age65_status, y= mmi, col = age65_status)) + 
+  scale_color_manual(values = color_pal) + 
+  geom_boxplot(size = 0.75,
+               fill = 'white') +
+  geom_jitter(alpha = 0.75, pch=19, size=1.5, position=position_jitterdodge(dodge.width=1, jitter.width=.5)) +
+  ggtitle(paste(cytof_cluster_grouped_list_rmv_UA[i])) +
+  #xlab("Baseline") +
+  ylab("MMI") +
+  #theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16), axis.text.y.left = element_text(angle = 0), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank(), legend.position = 'none', axis.text.y = element_text(color="black", size=11, angle = 90, hjust = 0.5), axis.text.x = element_text(color="black",size=11, angle = 0), axis.line = element_line(colour = "black"), axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14)) + 
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 4) +
+  scale_x_discrete(labels = c("Young", "Aged")) +
+  facet_wrap(~ `marker`, scales = "free", ncol = length(sig.markers_by.cluster)) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 13),
+        axis.title.x = #element_text(size = 14), 
+        element_blank(),
+        axis.title.y = element_text(size = 14),
+        plot.title = element_text(size = 15),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank()) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+  
+  print(baseline_plot)
+  
+  baseline_plot_list[[i]] <- baseline_plot
+  
+  on.treatment_plot <- ggplot(dataset_dummy_2, aes(x= age65_status, y= mmi, col = age65_status)) + 
+  scale_color_manual(values = color_pal) + 
+  geom_boxplot(size = 0.75,
+               fill = 'white') +
+  geom_jitter(alpha = 0.75, pch=19, size=1.5, position=position_jitterdodge(dodge.width=1, jitter.width=.5)) +
+  ggtitle(paste(cytof_cluster_grouped_list_rmv_UA[i])) +
+  #xlab("Baseline") +
+  ylab("MMI") +
+  #theme_minimal() +
+  theme(plot.title = element_text(hjust = 0.5, size = 16), axis.text.y.left = element_text(angle = 0), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank(), legend.position = 'none', axis.text.y = element_text(color="black", size=11, angle = 90, hjust = 0.5), axis.text.x = element_text(color="black",size=11, angle = 0), axis.line = element_line(colour = "black"), axis.title.x = element_text(size = 14), axis.title.y = element_text(size = 14)) + 
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 4) +
+  scale_x_discrete(labels = c("Young", "Aged")) +
+  facet_wrap(~ `marker`, scales = "free", ncol = length(sig.markers_by.cluster)) +
+  theme(axis.text.y = element_text(size = 13),
+        axis.text.x = element_text(size = 13),
+        axis.title.x = #element_text(size = 14), 
+        element_blank(),
+        axis.title.y = element_text(size = 14),
+        plot.title = element_text(size = 15),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank()) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+  
+  print(on.treatment_plot)
+  
+  on.treatment_plot_list[[i]] <- on.treatment_plot
+  }
+  
+}
+```
+
+### Plot saving
+
+```{r}
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "B_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[1]], 
+       height = 3, width = 6,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "B_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[1]], 
+       height = 3, width = 6,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "DNT_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[2]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "DNT_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[2]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "NK_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[4]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "NK_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[4]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcCM_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[5]], 
+       height = 3, width = 6,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcCM_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[5]], 
+       height = 3, width = 6,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcEFF_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[6]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcEFF_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[6]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcEM_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[7]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcEM_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[7]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcN_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[8]], 
+       height = 3, width = 18,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "TcN_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[8]], 
+       height = 3, width = 18,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Th17_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[9]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Th17_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[9]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Th2_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[10]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Th2_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[10]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "ThCTL_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[13]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "ThCTL_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[13]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "ThN_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[14]], 
+       height = 3, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "ThN_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[14]], 
+       height = 3, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Treg_baseline_age65.status_cytof.pdf"), 
+       plot = baseline_plot_list[[15]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Treg_on.treatment_age65.status_cytof.pdf"), 
+       plot = on.treatment_plot_list[[15]], 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+```
+
+### Supporting data
+
+### Supporting data file generation
+
+```{r}
+baseline_cytof.marker_supporting.data <- clinical_cytof.marker_baseline_v1 %>%
+  select(`pub_id paper`,age65_status,immune_cell,marker,mmi) %>%
+  mutate(age65_status = str_to_title(age65_status)) %>%
+  rename(`Immune cluster` = "immune_cell",
+         `Aged status` = "age65_status",
+         `Mean metal intensity (MMI)` = "mmi",
+         `Marker` = "marker",
+         `Subject ID` = "pub_id paper")
+
+on.treatment_cytof.marker_supporting.data <- clinical_cytof.marker_on.treatment_v1 %>%
+  select(`pub_id paper`,age65_status,immune_cell,marker,mmi) %>%
+  mutate(age65_status = str_to_title(age65_status)) %>%
+  rename(`Immune cluster` = "immune_cell",
+         `Aged status` = "age65_status",
+         `Mean metal intensity (MMI)` = "mmi",
+         `Marker` = "marker",
+         `Subject ID` = "pub_id paper")
+
+```
+
+### Exporting 
+
+```{r}
+
+write.xlsx(baseline_cytof.marker_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "baseline_cytof.marker.analysis_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+write.xlsx(on.treatment_cytof.marker_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "on.treatment_cytof.marker.analysis_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+```
+

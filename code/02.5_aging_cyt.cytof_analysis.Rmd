@@ -1,0 +1,2308 @@
+---
+title: "Cytokine and CyTOF analysis"
+output: html_document
+date: "2024-05-23"
+---
+
+# Set up
+
+### Libraries
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+
+library(here)
+library(tidyverse)
+library(grid)
+library(ggbreak) 
+library(ggplot2)
+library(ggpubr)
+library(svglite)
+library(rstatix)
+library(Cairo)
+library(openxlsx)
+library(readxl)
+library(greekLetters)
+library(NatParksPalettes)
+```
+
+### Directory pathing
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+here::i_am("code/02.5_aging_cyt.cytof_analysis.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+
+```
+
+### Source functions
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+
+source(here("code/functions/function_boxplot.R"))
+source(here("code/functions/mva_analysis.R"))
+source(here("code/functions/uv_analysis.R"))
+source(here("code/functions/response_inter_age_mva_analysis.R"))
+```
+
+### Color palettes
+ 
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+colors <- c(pal_npg()(10))
+color_from_viridis <- viridis(1, option = "D", alpha = 1)
+color_pal_w.viridis <- c(colors[2], color_from_viridis,colors[3:10])
+
+color_pal_retro <- c("#001219","#005f73","#0a9396","#e9d8a6","#ee9b00","#ca6702","#bb3e03","#ae2012","#9b2226")
+
+color_pal_retro_v2 <- c("#005f73","#0a9396","#e9d8a6","#ee9b00")
+
+color_pal <- c("#15607a","#3cc4ad","#db504a","#F49835","#594F4F")
+
+color_pal_2 <- c("#284B96",
+                 "#4AB8A7",
+                 "#F49835",
+                 "#878787",
+                 "#544667",
+                 "#C37672")
+
+color_pal_3 <- c("#173f5f","#20639b","#ed553b","#f6d55c","#3caea3")
+
+color_pal_4 <- c(color_from_viridis,"#284B96","#F49835","#594F4F","#3f3f3f")
+
+color_pal_5 <- c("#544A48","#53888C","#5DAB9B","#E08E44","#D94334","#AB1C0C")
+
+color_pal_6 <- c("#045275","#089099","#7CCBA2","#FCDe9c","#F0746E","#DC3977","#7c1d6f")
+
+color_pal_blu.orange <- c("#8ecae6","#219ebc","#023047","#ffb703","#fb8500")
+
+color_pal_blu.orange.v2 <- c("#006373","#05a3a4","#bfd5c9","#e8891d","#b35a20")
+
+color_pal_blu.red.yellow <- c("#084c61","#db504a","#e3b505","#4f6d7a","#56a3a6")
+
+color_blue.yellow <- c("#14d4c4","#147884","#010c37","#c99810")
+
+colors_bar <- c("#53a67c","#023047","#594F4F")
+
+color_npg_pal <- c(colors[3:10])
+
+color_nat.banff <- natparks.pals("Banff",4)
+```
+
+### Read RDS files
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+
+demo_baseline_cyt_log2 <- readRDS(here("output/RDS files/demo_baseline_log2.rds"))
+
+demo_cyt_change <- readRDS(here("output/RDS files/demo_change.rds"))
+
+clinical_import <- readRDS(here("output/RDS files/clinical.rds"))
+
+total_cytokine <- readRDS(here("output/RDS files/total_cytokine.rds"))
+
+total_cohort_cytof_clinical <- readRDS(here("output/RDS files/total_cytof_clinical.rds"))
+
+total_cytof_change <- readRDS(here("output/RDS files/total_cytof_change.rds"))
+
+total_cytof_change_with_baseline <- readRDS(here("output/RDS files/total_cytof_change_with_baseline.rds"))
+
+total_cohort_cytof_clinical_v1 <- readRDS(here("output/RDS files/total_cytof_clinical_v1.rds"))
+
+total_cytof_change_v1 <- readRDS(here("output/RDS files/total_cytof_change_v1.rds"))
+
+total_cytof_change_with_baseline_v1 <- readRDS(here("output/RDS files/total_cytof_change_with_baseline_v1.rds"))
+
+file_path_wbc_counts <- here("data/clinical/final_absolute_cell_counts.xlsx")
+wbc_counts_tb <- read_excel(file_path_wbc_counts) %>%
+  rename(`blood timepoint` = "jci timepoint")
+
+```
+
+### Data processing
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+# creating cbc results tibble
+baseline_wbc.types <- wbc_counts_tb %>%
+  select(`pt id`, baseline_wbc:baseline_lymph_plus_monocytes) 
+
+baseline_wbc_counts_for.cytof <- wbc_counts_tb %>%
+  select(`pt id`, baseline_lymph_plus_monocytes) %>%
+  mutate(`blood timepoint` = "baseline") %>%
+  relocate(`blood timepoint`, .after = "pt id")
+
+on.treatment_wbc_counts_for.cytof <- wbc_counts_tb %>%
+  select(`pt id`, `blood timepoint`, `sample date`, on.treatment_lymph_plus_monocytes)
+
+# clinical tibble with age status
+
+clinical_tb <- clinical_import
+
+# making age status factor and ordered
+
+clinical_tb$age65_status <- factor(clinical_tb$age65_status, levels = c("yes", "no"))
+
+# clinical and baseline wbc types tibble
+
+clinical_baseline_wbc.types <- clinical_tb %>%
+  left_join(baseline_wbc.types, by = "pt id") %>%
+  pivot_longer(baseline_wbc:baseline_lymph_plus_monocytes, names_to = "immune_cell", values_to = "cell_count")
+
+# cytokine baseline tibble
+
+demo_baseline_cyt_log2_age.status <- demo_baseline_cyt_log2 %>%
+  mutate(log2_average_baseline_conc = log2(`average_baseline_conc`)) %>%
+  relocate(log2_average_baseline_conc, .after = average_baseline_conc) %>%
+  distinct(`pt id`,`cytokines`, .keep_all = TRUE)
+
+
+demo_baseline_cyt_log2_age.status <- demo_baseline_cyt_log2_age.status %>%  mutate(age = `age on study`,
+            age.per10 = age/10) %>%
+     mutate(I.gp_gi_gu_else = case_when(`cancer group`=="gi" ~ 0,
+                                        `cancer group`=="gu" ~ 1,
+                                                        TRUE ~ 2),
+                   I.gp_gi_gu_else = factor(I.gp_gi_gu_else),
+                   pr_trt = `prior treatment`) 
+
+
+# cytokine timepoint 1 tibble
+
+demo_cyt_change_timepoint1_age.status <- demo_cyt_change %>%
+  #arrange(`pt id`,`sample date`) %>%
+  arrange(`pt id`,`blood timepoint order`) %>%
+  distinct(`pt id`, cytokines, .keep_all = TRUE) 
+
+demo_cyt_change_timepoint1_age.status$orr.age.status <- factor(demo_cyt_change_timepoint1_age.status$orr.age.status, 
+                                                levels = c("RY", "NRY",
+                                                           "RO", "NRO"))
+
+
+demo_cyt_change_timepoint1_age.status <- demo_cyt_change_timepoint1_age.status %>%  
+  mutate(age = `age on study`,
+         age.per10 = age/10) %>%
+     mutate(I.gp_gi_gu_else = case_when(`cancer group`=="gi" ~ 0,
+                                        `cancer group`=="gu" ~ 1,
+                                                        TRUE ~ 2),
+                   I.gp_gi_gu_else = factor(I.gp_gi_gu_else),
+                   pr_trt = `prior treatment`) 
+
+# baseline cytof tibble
+
+baseline_cytof_clinical_age.status <- total_cohort_cytof_clinical %>%
+  filter(`blood timepoint number` == 0) %>%
+  relocate(cell_count, .after = proportion)
+
+baseline_cytof_clinical_age.status_immune_groups <- total_cohort_cytof_clinical_v1 %>%
+  filter(`blood timepoint number` == 0)
+
+
+baseline_cytof_clinical_age.status_immune_groups <- baseline_cytof_clinical_age.status_immune_groups %>%
+                    mutate(age = `age on study`,
+                           age.per10 = age/10) %>%
+                    mutate(I.gp_gi_gu_else = case_when(`cancer group`=="gi" ~0,
+                                                     `cancer group`=="gu" ~1,
+                                                     TRUE ~ 2),
+                   I.gp_gi_gu_else = factor(I.gp_gi_gu_else),
+                   pr_trt = `prior treatment`) 
+
+
+# baseline cytof and response status tibble
+
+baseline_cytof_age.orr <- baseline_cytof_clinical_age.status %>%
+  filter(!is.na(orr)) 
+
+baseline_cytof_age.orr$orr.age.status <- factor(baseline_cytof_age.orr$orr.age.status, 
+                                                levels = c("RY", "NRY",
+                                                           "RO", "NRO"))
+
+baseline_cytof_age.orr_immune_groups <- baseline_cytof_clinical_age.status_immune_groups %>%
+  filter(!is.na(orr)) 
+
+
+baseline_cytof_age.orr_immune_groups$orr.age.status <- factor(baseline_cytof_age.orr_immune_groups$orr.age.status, 
+                                                levels = c("RY", "NRY",
+                                                           "RO", "NRO"))
+
+baseline_cytof_age.orr_older.pts <- baseline_cytof_age.orr %>%
+  filter(age65_status == "yes")
+
+baseline_cytof_age.orr_younger.pts <- baseline_cytof_age.orr %>%
+  filter(age65_status == "no")
+
+baseline_cytof_age.orr_immune_groups_older.pts <- baseline_cytof_age.orr_immune_groups %>%
+  filter(age65_status == "yes")
+
+baseline_cytof_age.orr_immune_groups_younger.pts <- baseline_cytof_age.orr_immune_groups %>%
+  filter(age65_status == "no")
+
+baseline_cytof_age.orr_immune_groups_responders <- baseline_cytof_age.orr_immune_groups %>%
+  filter(orr_character == "yes")
+
+baseline_cytof_age.orr_immune_groups_non.responders<- baseline_cytof_age.orr_immune_groups %>%
+  filter(orr_character == "no")
+
+# timepoint 1 cytof tibble
+
+total_cytof_change_timepoint1_age.status <- total_cytof_change %>%
+  filter(`blood timepoint number` == 1) 
+
+total_cytof_change_timepoint1_age.status$orr.age.status <- factor(total_cytof_change_timepoint1_age.status$orr.age.status, 
+                                                levels = c("RY", "NRY",
+                                                           "RO", "NRO"))
+
+timepoint1_cytof_clinical_age.status_immune_groups <- total_cytof_change_v1 %>%
+  filter(`blood timepoint number` == 1)
+
+timepoint1_cytof_clinical_age.status_immune_groups$orr.age.status <- factor(timepoint1_cytof_clinical_age.status_immune_groups$orr.age.status, 
+                                                levels = c("RY", "NRY",
+                                                           "RO", "NRO"))
+
+timepoint1_cytof_clinical_age65.response_immune_groups <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  filter(!is.na(orr))
+
+
+
+timepoint1_cytof_clinical_age.status_immune_groups <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  mutate(age = `age on study`,
+                           age.per10 = age/10) %>%
+                    mutate(I.gp_gi_gu_else = case_when(`cancer group`=="gi" ~0,
+                                                     `cancer group`=="gu" ~1,
+                                                     TRUE ~ 2),
+                   I.gp_gi_gu_else = factor(I.gp_gi_gu_else),
+                   pr_trt = `prior treatment`) 
+
+timepoint1_cytof_clinical_age.orr_older.pts <- total_cytof_change_timepoint1_age.status %>%
+  filter(age65_status == "yes") %>%
+  filter(!is.na(orr))
+
+timepoint1_cytof_clinical_age.orr_younger.pts <- total_cytof_change_timepoint1_age.status %>%
+  filter(age65_status == "no") %>%
+  filter(!is.na(orr))
+
+timepoint1_cytof_clinical_age.orr_immune_groups_older.pts <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  filter(age65_status == "yes") %>%
+  filter(!is.na(orr))
+
+timepoint1_cytof_clinical_age.orr_immune_groups_younger.pts <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  filter(age65_status == "no") %>%
+  filter(!is.na(orr))
+
+timepoint1_cytof_clinical_age.orr_immune_groups_responders <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  filter(orr_character == "yes") %>%
+  filter(!is.na(orr))
+
+timepoint1_cytof_clinical_age.orr_immune_groups_non.responders <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  filter(orr_character == "no") %>%
+  filter(!is.na(orr))
+
+# baseline cytokines, age status, and cancer groups
+baseline_cancer.group <- demo_baseline_cyt_log2_age.status %>%
+  filter(`cancer type` %in% c("hepatocellular carcinoma","renal cell carcinoma","bladder cancer","head and neck cancer")) %>%
+  mutate(cancer_type = case_when(`cancer type` == "hepatocellular carcinoma" ~ "HCC",
+                                 `cancer type` == "renal cell carcinoma" ~ "RCC",
+                                 `cancer type` == "head and neck cancer" ~ "HNC",
+                                 `cancer type` == "bladder cancer" ~ "BC",
+                                 TRUE ~ NA_character_)) %>%
+  mutate(cancer.type_age.status = case_when(cancer_type == "hepatocellular carcinoma" & age65_status == "yes" ~ "HCC/aged",
+                                            cancer_type == "hepatocellular carcinoma" & age65_status == "no" ~ "HCC/young",
+                                            cancer_type == "renal cell carcinoma" & age65_status == "yes" ~ "RCC/aged",
+                                            cancer_type == "renal cell carcinoma" & age65_status == "no" ~ "RCC/young",
+                                            cancer_type == "head and neck cancer" & age65_status == "yes" ~ "HNC/aged",
+                                            cancer_type == "head and neck cancer" & age65_status == "no" ~ "HNC/young",
+                                            cancer_type == "bladder cancer" & age65_status == "yes" ~ "BC/aged",
+                                            cancer_type == "bladder cancer" & age65_status == "no" ~ "BC/young",
+                                            TRUE ~ NA_character_))
+
+baseline_cancer.group$cancer_type <- factor(baseline_cancer.group$cancer_type, levels = c("HCC","RCC","BC","HNC"))
+
+baseline_cancer.group_label <- c("HCC","RCC","BC","HNC")
+```
+
+### Special characters for graphs
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+# For >= symbol in strings
+greater_than_equal <- "\u2265"
+less_than <- "\u003c"
+
+age_greater.equal_65 <- paste0("Age ",greater_than_equal,"65")
+age_greater.equal_65 <- "Aged"
+
+age_less_65 <- paste0("Age ",less_than,"65")
+age_less_65 <- "Young"
+```
+
+### CyTOF cluster lists (individual and grouped)
+Creates lists for two methods of annotation clustering for CyTOF and removes UA which are the unassigned cluster
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+
+cytof_cluster_individual_list <- unique(total_cohort_cytof_clinical$immune_cell) 
+cytof_cluster_individual_list_rmv_UA <- cytof_cluster_individual_list[-26]
+
+cytof_cluster_grouped_list <- unique(total_cohort_cytof_clinical_v1$immune_cell)
+cytof_cluster_grouped_list_rmv_UA <- cytof_cluster_grouped_list[-16]
+
+```
+
+### Cohort distribution by age
+
+```{r,warning = FALSE, message = FALSE}
+clinical_tb %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+```
+
+# Statistical analysis
+
+### Baseline lymphocytes counts
+
+#### Baseline CBC types: Wilcoxon analysis by age status
+```{r, warning = FALSE, message = FALSE}
+clinical_baseline_lymph <- clinical_tb %>%
+  left_join(baseline_wbc.types, by = "pt id") 
+
+clinical_baseline_lymph_long <- clinical_tb %>%
+  left_join(baseline_wbc.types, by = "pt id") %>%
+  pivot_longer(baseline_wbc:baseline_lymph_plus_monocytes, names_to = "type_wbc", values_to = "wbc_count") 
+
+# count by age status for this analysis
+
+clinical_baseline_lymph_long  %>%
+  filter(!is.na(wbc_count)) %>%
+  ungroup() %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+# assess difference at baseline between age 65 status
+
+Wilcoxon.baseline.lymphocyte_age65status <- clinical_baseline_lymph_long  %>%
+  filter(!is.na(wbc_count)) %>%
+  group_by(type_wbc) %>%
+  transmute(median_age65.older = median(wbc_count[age65_status == "yes"]),
+         median_age65.younger = median(wbc_count[age65_status == "no"]),
+         std_age65.older = sd(wbc_count[age65_status == "yes"]),
+         std_age65.younger = sd(wbc_count[age65_status == "no"]),
+         pval = wilcox.test(wbc_count ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(type_wbc, .keep_all = TRUE) %>%
+  ungroup() %>%
+  add_significance()
+```
+
+### Cytokine
+
+#### Baseline cytokines: Wilcoxon analysis by age status
+```{r,warning = FALSE, message = FALSE}
+
+demo_baseline_cyt_log2 %>%
+  ungroup() %>%
+  distinct(`pt id`) %>%
+  summarise(count = n())
+
+demo_baseline_cyt_log2_age.status  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+Wilcoxon.baseline.cytokines_age65status <- demo_baseline_cyt_log2_age.status  %>%
+  filter(!is.na(log2_average_baseline_conc)) %>%
+  group_by(cytokines) %>%
+  transmute(median_age65.older = median(log2_average_baseline_conc[age65_status == "yes"]),
+         median_age65.younger = median(log2_average_baseline_conc[age65_status == "no"]),
+         std_age65.older = sd(log2_average_baseline_conc[age65_status == "yes"]),
+         std_age65.younger = sd(log2_average_baseline_conc[age65_status == "no"]),
+         pval = wilcox.test(log2_average_baseline_conc ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(cytokines, .keep_all = TRUE) %>%
+  ungroup() %>%
+  arrange(pval) %>%
+  add_significance()
+
+```
+#### On treatment cytokines: Wilcoxon analysis by age status (concentration and log2 fold change)
+```{r,warning = FALSE, message = FALSE}
+
+demo_cyt_change_timepoint1_age.status  %>%
+  ungroup() %>%
+  distinct(`pt id`) %>%
+  summarise(count = n())
+
+demo_cyt_change_timepoint1_age.status  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+Wilcoxon.on.treatment.cytokines_conc_age65status <- demo_cyt_change_timepoint1_age.status  %>%
+  filter(!is.na(concentration)) %>%
+  group_by(cytokines) %>%
+  transmute(median_age65.older = median(concentration[age65_status == "yes"]),
+         median_age65.younger = median(concentration[age65_status == "no"]),
+         std_age65.older = sd(concentration[age65_status == "yes"]),
+         std_age65.younger = sd(concentration[age65_status == "no"]),
+         pval = wilcox.test(concentration ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(cytokines, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cyt_conc_list <- Wilcoxon.on.treatment.cytokines_conc_age65status %>%
+  filter(pval < 0.05)
+
+Wilcoxon.on.treatment.cytokines_log2fold_age65status <- demo_cyt_change_timepoint1_age.status  %>%
+  filter(!is.na(fold_log2)) %>%
+  group_by(cytokines) %>%
+  transmute(median_age65.older = median(fold_log2[age65_status == "yes"]),
+         median_age65.younger = median(fold_log2[age65_status == "no"]),
+         std_age65.older = sd(fold_log2[age65_status == "yes"]),
+         std_age65.younger = sd(fold_log2[age65_status == "no"]),
+         pval = wilcox.test(fold_log2 ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(cytokines, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cyt_log2fold_list <- Wilcoxon.on.treatment.cytokines_log2fold_age65status %>%
+  filter(pval < 0.05)
+```
+
+### MVA analysis for cytokines
+
+```{r}
+### Supp Fig 5, 6
+hcc_cyt_bl_uv_result <- uv_analysis(data =  demo_baseline_cyt_log2_age.status %>% filter(`cancer type`=="hepatocellular carcinoma"), cyt_imm_var = "cytokines", y_var = "log2_average_baseline_conc")
+
+hcc_cyt_ontrt_uv_result <- uv_analysis(data = demo_cyt_change_timepoint1_age.status %>% filter(`cancer type`=="hepatocellular carcinoma"), cyt_imm_var = "cytokines", y_var = "log2_conc", time_var = "OnTrt_cyt")
+
+hcc_cyt_chg_uv_result <- uv_analysis(data =  demo_cyt_change_timepoint1_age.status %>% filter(`cancer type`=="hepatocellular carcinoma"), cyt_imm_var = "cytokines", y_var = "fold_log2", time_var = "Chg_cyt")
+
+
+rcc_cyt_bl_uv_result <- uv_analysis(data =  demo_baseline_cyt_log2_age.status %>% filter(`cancer type`=="renal cell carcinoma"), cyt_imm_var = "cytokines", y_var = "log2_average_baseline_conc")
+
+rcc_cyt_ontrt_uv_result <- uv_analysis(data = demo_cyt_change_timepoint1_age.status %>% filter(`cancer type`=="renal cell carcinoma"), cyt_imm_var = "cytokines", y_var = "log2_conc", time_var = "OnTrt_cyt")
+
+rcc_cyt_chg_uv_result <- uv_analysis(data =  demo_cyt_change_timepoint1_age.status %>% filter(`cancer type`=="renal cell carcinoma"), cyt_imm_var = "cytokines", y_var = "fold_log2", time_var = "Chg_cyt")
+
+
+### Supp Fig 7-8
+cyt_bl_mva_result <- mva_analysis(data =  demo_baseline_cyt_log2_age.status, cyt_imm_var = "cytokines", y_var = "log2_average_baseline_conc")
+
+cyt_ontrt_mva_result <- mva_analysis(data = demo_cyt_change_timepoint1_age.status, cyt_imm_var = "cytokines", y_var = "log2_conc", time_var = "OnTrt_cyt")
+
+cyt_chg_mva_result <- mva_analysis(data =  demo_cyt_change_timepoint1_age.status, cyt_imm_var = "cytokines", y_var = "fold_log2", time_var = "Chg_cyt")
+
+### Supp Fig 9
+cyt_resp_bl_mva_result <- response_inter_age_mva_analysis(data = demo_baseline_cyt_log2_age.status %>% filter(is.na(orr)==F), cyt_imm_var = "cytokines", y_var = "log2_average_baseline_conc",time_var = "BL_cyt")
+
+
+cyt_resp_ontrt_mva_result <- response_inter_age_mva_analysis(data = demo_cyt_change_timepoint1_age.status %>% filter(is.na(orr)==F), cyt_imm_var = "cytokines", y_var = "log2_conc",time_var = "Ontrt_cyt")
+
+cyt_resp_chg_mva_result <- response_inter_age_mva_analysis(data = demo_cyt_change_timepoint1_age.status %>% filter(is.na(orr)==F) %>% mutate(fold_log2 = ifelse(fold_log2==Inf, log2_conc-log2(0.001),fold_log2)), cyt_imm_var = "cytokines", y_var = "fold_log2",time_var = "Chg_cyt")
+```
+
+#### Baseline cytokines: Wilcoxon analysis to select for significant cytokines different between two cancer types
+```{r,warning = FALSE, message = FALSE}
+
+baseline_sig.cyt_wilcox_2cancer.group_list <- compare_means(log2_average_baseline_conc ~ cancer_type, group.by = 'cytokines', method = 'wilcox.test', data = baseline_cancer.group) %>%
+  filter(p <0.05)
+
+```
+
+#### Baseline cytokines: Kruskal analysis to select for significant cytokines different between four cancer types
+```{r,warning = FALSE, message = FALSE}
+
+baseline_sig.cyt_kruskal_4cancer.group_list <- compare_means(log2_average_baseline_conc ~ cancer_type, group.by = 'cytokines', method = 'kruskal.test', data = baseline_cancer.group) %>%
+  filter(p <0.05)
+
+```
+
+#### Baseline cytokines: Wilcoxon analysis for Il-6 and MIG (CXCL9) to assess differences by age status within four cancer groups
+```{r,warning = FALSE, message = FALSE}
+
+Wilcoxon.baseline.il6_cancer.group.age65status <- demo_baseline_cyt_log2_age.status  %>%
+  filter(!is.na(log2_average_baseline_conc)) %>%
+  filter(cytokines %in% c("il-6")) %>%
+  filter(`cancer type` %in% c("hepatocellular carcinoma","renal cell carcinoma","bladder cancer","head and neck cancer")) %>%
+  group_by(`cancer type`) %>%
+  transmute(median_age65.older = median(log2_average_baseline_conc[age65_status == "yes"]),
+         median_age65.younger = median(log2_average_baseline_conc[age65_status == "no"]),
+         std_age65.older = sd(log2_average_baseline_conc[age65_status == "yes"]),
+         std_age65.younger = sd(log2_average_baseline_conc[age65_status == "no"]),
+         pval = wilcox.test(log2_average_baseline_conc ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(`cancer type`, .keep_all = TRUE) %>%
+  ungroup() %>%
+  arrange(pval) %>%
+  add_significance()
+
+Wilcoxon.baseline.mig_cancer.group.age65status <- demo_baseline_cyt_log2_age.status  %>%
+  filter(!is.na(log2_average_baseline_conc)) %>%
+  filter(cytokines %in% c("mig")) %>%
+  filter(`cancer type` %in% c("hepatocellular carcinoma","renal cell carcinoma","bladder cancer","head and neck cancer")) %>%
+  group_by(`cancer type`) %>%
+  transmute(median_age65.older = median(log2_average_baseline_conc[age65_status == "yes"]),
+         median_age65.younger = median(log2_average_baseline_conc[age65_status == "no"]),
+         std_age65.older = sd(log2_average_baseline_conc[age65_status == "yes"]),
+         std_age65.younger = sd(log2_average_baseline_conc[age65_status == "no"]),
+         pval = wilcox.test(log2_average_baseline_conc ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(`cancer type`, .keep_all = TRUE) %>%
+  ungroup() %>%
+  arrange(pval) %>%
+  add_significance()
+
+```
+
+## CyTOF
+
+#### Baseline CyTOF: Wilcoxon analysis by age status
+Analysis is performed on both detailed (individual) and grouped CyTOF clusters (2 methods of clustering)
+
+```{r,warning = FALSE, message = FALSE}
+# cytof baseline counts by age
+baseline_cytof_clinical_age.status_immune_groups %>%
+  ungroup() %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  group_by(age65_status) %>%
+  summarise(count =n())
+
+# individual clusters
+Wilcoxon.baseline.cytof_age65status <- baseline_cytof_clinical_age.status  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_age65.older = median(proportion[age65_status == "yes"]),
+         median_age65.younger = median(proportion[age65_status == "no"]),
+         std_age65.older = sd(proportion[age65_status == "yes"]),
+         std_age65.younger = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+baseline_sig.cytof.individual_list <- Wilcoxon.baseline.cytof_age65status %>%
+  filter(pval < 0.05)
+
+baseline_pval.ranked_cytof.individual_list_rmv_UA <- Wilcoxon.baseline.cytof_age65status %>%
+  filter(!immune_cell == "UA")
+
+# grouped immune clusters
+Wilcoxon.baseline.cytof_immune.groups_age65status <- baseline_cytof_clinical_age.status_immune_groups  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_age65.older = median(proportion[age65_status == "yes"]),
+         median_age65.younger = median(proportion[age65_status == "no"]),
+         std_age65.older = sd(proportion[age65_status == "yes"]),
+         std_age65.younger = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+baseline_sig.cytof.grouped_list <- Wilcoxon.baseline.cytof_immune.groups_age65status %>%
+  filter(pval < 0.05)
+
+baseline_pval.ranked_cytof.grouped_list_rmv_UA <- Wilcoxon.baseline.cytof_immune.groups_age65status %>%
+  filter(!immune_cell == "UA")
+
+```
+
+
+### CyTOF MVA
+```{r}
+### Supp Fig 14-15
+cytof_bl_mva_result <- mva_analysis(data= baseline_cytof_clinical_age.status_immune_groups, cyt_imm_var = "immune_cell", y_var = "proportion", time_var="BL_cytof")
+
+cytof_ontrt_mva_result <- mva_analysis(data= timepoint1_cytof_clinical_age.status_immune_groups, cyt_imm_var = "immune_cell", y_var = "proportion", time_var="OnTrt_cytof")
+
+cytof_chg_mva_result <- mva_analysis(data= timepoint1_cytof_clinical_age.status_immune_groups, cyt_imm_var = "immune_cell", y_var = "fold_log2_prop", time_var="Chg_cytof")
+
+### Supp Fig 16
+cytof_bl_orr_mva_result <- response_inter_age_mva_analysis(data= baseline_cytof_clinical_age.status_immune_groups %>% filter(is.na(orr)==F), cyt_imm_var = "immune_cell", y_var = "proportion", time_var="BL_cytof")
+
+cytof_ontrt_orr_mva_result <- response_inter_age_mva_analysis(data= timepoint1_cytof_clinical_age.status_immune_groups %>% filter(is.na(orr)==F), cyt_imm_var = "immune_cell", y_var = "proportion", time_var="OnTrt_cytof")
+
+
+cytof_chg_orr_mva_result <- response_inter_age_mva_analysis(data= timepoint1_cytof_clinical_age.status_immune_groups %>% filter(is.na(orr)==F) %>% ### zero correction
+                mutate(fold_log2_prop = ifelse(fold_log2_prop==Inf, log2(proportion)-log2(0.001),fold_log2_prop)), cyt_imm_var = "immune_cell", y_var = "fold_log2_prop", time_var="Chg_cytof")
+```
+
+#### CyTOF patients evaluable for RECIST
+
+```{r,warning = FALSE, message = FALSE}
+# pts available for recist
+baseline_cytof_age.orr %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  summarise(count = n())
+
+# count by response groups
+baseline_cytof_age.orr %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  group_by(orr.age.status) %>%
+  summarise(count = n())
+
+```
+
+#### Baseline CyTOF: Wilcoxon analysis for response status divided into aged or young patient for grouped immune clusters
+
+```{r,warning = FALSE, message = FALSE}
+
+# Age 65 and older
+Wilcoxon.baseline.cytof_immune.groups_older.response <- baseline_cytof_age.orr_immune_groups_older.pts  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_response.old = median(proportion[orr.age.status == "RO"]),
+         median_non.response.old = median(proportion[orr.age.status == "NRO"]),
+         std_response.old = sd(proportion[orr.age.status == "RO"]),
+         std_non.response.old = sd(proportion[orr.age.status == "NRO"]),
+         pval = wilcox.test(proportion ~ orr.age.status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+baseline_sig.cytof.grouped_old.response_list <- Wilcoxon.baseline.cytof_immune.groups_older.response %>%
+  filter(pval < 0.05)
+
+# Younger than 65
+Wilcoxon.baseline.cytof_immune.groups_younger.response <- baseline_cytof_age.orr_immune_groups_younger.pts  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_response.young = median(proportion[orr.age.status == "RY"]),
+         median_non.response.young = median(proportion[orr.age.status == "NRY"]),
+         std_response.young = sd(proportion[orr.age.status == "RY"]),
+         std_non.response.young = sd(proportion[orr.age.status == "NRY"]),
+         pval = wilcox.test(proportion ~ orr.age.status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+baseline_sig.cytof.grouped_young.response_list <- Wilcoxon.baseline.cytof_immune.groups_younger.response %>%
+  filter(pval < 0.05) %>%
+  filter(!immune_cell == "UA")
+
+baseline_sig.cytof.grouped_age.response_total.list <- c(baseline_sig.cytof.grouped_old.response_list$immune_cell,
+                                                        baseline_sig.cytof.grouped_young.response_list$immune_cell)
+
+
+```
+
+#### Baseline CyTOF: Wilcoxon analysis for age status based on responder status for grouped immune clusters
+
+```{r,warning = FALSE, message = FALSE}
+
+# Responder differences by age status
+Wilcoxon.baseline.cytof_immune.groups_responders <- baseline_cytof_age.orr_immune_groups_responders  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_aged = median(proportion[age65_status == "yes"]),
+         median_young = median(proportion[age65_status == "no"]),
+         std_aged = sd(proportion[age65_status == "yes"]),
+         std_young = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+baseline_sig.cytof.grouped_responders_list <- Wilcoxon.baseline.cytof_immune.groups_responders %>%
+  filter(pval < 0.05)
+
+# Non responder differences by age status
+Wilcoxon.baseline.cytof_immune.groups_non.responders <- baseline_cytof_age.orr_immune_groups_non.responders  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_aged = median(proportion[age65_status == "yes"]),
+         median_young = median(proportion[age65_status == "no"]),
+         std_aged = sd(proportion[age65_status == "yes"]),
+         std_young = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+baseline_sig.cytof.grouped_non.responders_list <- Wilcoxon.baseline.cytof_immune.groups_non.responders %>%
+  filter(pval < 0.05) %>%
+  filter(!immune_cell == "UA")
+
+baseline_sig.cytof.grouped_responder.status_total.list <- c(baseline_sig.cytof.grouped_responders_list$immune_cell,
+                                                        baseline_sig.cytof.grouped_non.responders_list$immune_cell)
+
+
+```
+
+#### On treatment CyTOF: Wilcoxon analysis by age 65 status
+
+```{r,warning = FALSE, message = FALSE}
+
+# individual clusters
+Wilcoxon.on.treatment.cytof_age65status <- total_cytof_change_timepoint1_age.status  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_age65.older = median(proportion[age65_status == "yes"]),
+         median_age65.younger = median(proportion[age65_status == "no"]),
+         std_age65.older = sd(proportion[age65_status == "yes"]),
+         std_age65.younger = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cytof.individual_list <- Wilcoxon.on.treatment.cytof_age65status %>%
+  filter(pval < 0.05)
+
+on.treatment_pval.ranked_cytof.individual_list_rmv_UA <- Wilcoxon.on.treatment.cytof_age65status %>%
+  filter(!immune_cell == "UA")
+
+# grouped immune clusters
+Wilcoxon.on.treatment.cytof_immune.groups_age65status <- timepoint1_cytof_clinical_age.status_immune_groups  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_age65.older = median(proportion[age65_status == "yes"]),
+         median_age65.younger = median(proportion[age65_status == "no"]),
+         std_age65.older = sd(proportion[age65_status == "yes"]),
+         std_age65.younger = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cytof.grouped_list <- Wilcoxon.on.treatment.cytof_immune.groups_age65status %>%
+  filter(pval < 0.05)
+
+on.treatment_prop_pval.ranked_cytof.grouped_list_rmv_UA <- Wilcoxon.on.treatment.cytof_immune.groups_age65status %>%
+  filter(!immune_cell == "UA")
+
+Wilcoxon.on.treatment.cytof_immune.groups_log2fold_age65status <- timepoint1_cytof_clinical_age.status_immune_groups  %>%
+  filter(!is.na(fold_log2_prop)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_age65.older = median(fold_log2_prop[age65_status == "yes"]),
+         median_age65.younger = median(fold_log2_prop[age65_status == "no"]),
+         std_age65.older = sd(fold_log2_prop[age65_status == "yes"]),
+         std_age65.younger = sd(fold_log2_prop[age65_status == "no"]),
+         pval = wilcox.test(fold_log2_prop ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cytof.grouped_log2fold_list <- Wilcoxon.on.treatment.cytof_immune.groups_log2fold_age65status %>%
+  filter(pval < 0.05)
+
+on.treatment_log2fold_pval.ranked_cytof.grouped_list_rmv_UA <- Wilcoxon.on.treatment.cytof_immune.groups_log2fold_age65status %>%
+  filter(!immune_cell == "UA")
+
+```
+
+#### On treatment CyTOF: Wilcoxon analysis by age and response status for grouped immune clusters
+
+```{r,warning = FALSE, message = FALSE}
+
+# Age 65 or older
+timepoint1_cytof_clinical_age.orr_immune_groups_older.pts  %>%
+  ungroup() %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  group_by(orr.age.status) %>%
+  summarise(count = n())
+
+Wilcoxon.timepoint1.cytof_prop_immune.groups_older.response <- timepoint1_cytof_clinical_age.orr_immune_groups_older.pts  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_response.old = median(proportion[orr.age.status == "RO"]),
+         median_non.response.old = median(proportion[orr.age.status == "NRO"]),
+         std_response.old = sd(proportion[orr.age.status == "RO"]),
+         std_non.response.old = sd(proportion[orr.age.status == "NRO"]),
+         pval = wilcox.test(proportion ~ orr.age.status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cytof.grouped_prop_old.response_list <- Wilcoxon.timepoint1.cytof_prop_immune.groups_older.response %>%
+  filter(pval < 0.05)
+
+Wilcoxon.timepoint1.cytof_log2fold_immune.groups_older.response <- timepoint1_cytof_clinical_age.orr_immune_groups_older.pts  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_response.old = median(fold_log2_prop[orr.age.status == "RO"]),
+         median_non.response.old = median(fold_log2_prop[orr.age.status == "NRO"]),
+         std_response.old = sd(fold_log2_prop[orr.age.status == "RO"]),
+         std_non.response.old = sd(fold_log2_prop[orr.age.status == "NRO"]),
+         pval = wilcox.test(fold_log2_prop ~ orr.age.status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cytof.grouped_log2fold_old.response_list <- Wilcoxon.timepoint1.cytof_log2fold_immune.groups_older.response %>%
+  filter(pval < 0.05)
+
+# Younger than 65
+timepoint1_cytof_clinical_age.orr_immune_groups_younger.pts %>%
+  ungroup() %>%
+  distinct(`pt id`, .keep_all = TRUE) %>%
+  group_by(orr.age.status) %>%
+  summarise(count = n())
+
+Wilcoxon.timepoint1.cytof_prop_immune.groups_younger.response <- timepoint1_cytof_clinical_age.orr_immune_groups_younger.pts  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_response.young = median(proportion[orr.age.status == "RY"]),
+         median_non.response.young = median(proportion[orr.age.status == "NRY"]),
+         std_response.young = sd(proportion[orr.age.status == "RY"]),
+         std_non.response.young = sd(proportion[orr.age.status == "NRY"]),
+         pval = wilcox.test(proportion ~ orr.age.status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cytof.grouped_prop_younger.response_list <- Wilcoxon.timepoint1.cytof_prop_immune.groups_younger.response %>%
+  filter(pval < 0.05) %>%
+  filter(!immune_cell == "UA")
+
+Wilcoxon.timepoint1.cytof_log2fold_immune.groups_younger.response <- timepoint1_cytof_clinical_age.orr_immune_groups_younger.pts  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_response.young = median(fold_log2_prop[orr.age.status == "RY"]),
+         median_non.response.young = median(fold_log2_prop[orr.age.status == "NRY"]),
+         std_response.young = sd(fold_log2_prop[orr.age.status == "RY"]),
+         std_non.response.young = sd(fold_log2_prop[orr.age.status == "NRY"]),
+         pval = wilcox.test(fold_log2_prop ~ orr.age.status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+on.treatment_sig.cytof.grouped_log2fold_younger.response_list <- Wilcoxon.timepoint1.cytof_log2fold_immune.groups_younger.response %>%
+  filter(pval < 0.05)
+
+# Combining significant cytof lists for prop and log2fold separately
+
+on.treatment_sig.cytof.grouped_prop_age.response_total.list <- c(on.treatment_sig.cytof.grouped_prop_old.response_list$immune_cell,
+                                                        on.treatment_sig.cytof.grouped_prop_younger.response_list$immune_cell)
+
+on.treatment_sig.cytof.grouped_log2fold_age.response_total.list <- c(on.treatment_sig.cytof.grouped_log2fold_old.response_list$immune_cell,
+                                                        on.treatment_sig.cytof.grouped_log2fold_younger.response_list$immune_cell)
+```
+
+#### On treatment CyTOF: Wilcoxon analysis for age status based on responder status for grouped immune clusters
+
+```{r,warning = FALSE, message = FALSE}
+
+# Responder differences by age status
+Wilcoxon.timepoint1.cytof_prop_immune.groups_responders <- timepoint1_cytof_clinical_age.orr_immune_groups_responders  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_aged = median(proportion[age65_status == "yes"]),
+         median_young = median(proportion[age65_status == "no"]),
+         std_aged = sd(proportion[age65_status == "yes"]),
+         std_young = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+timepoint1_prop_sig.cytof.grouped_responders_list <- Wilcoxon.timepoint1.cytof_prop_immune.groups_responders %>%
+  filter(pval < 0.05)
+
+Wilcoxon.timepoint1.cytof_log2fold_immune.groups_responders <- timepoint1_cytof_clinical_age.orr_immune_groups_responders  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_aged = median(fold_log2_prop[age65_status == "yes"]),
+         median_young = median(fold_log2_prop[age65_status == "no"]),
+         std_aged = sd(fold_log2_prop[age65_status == "yes"]),
+         std_young = sd(fold_log2_prop[age65_status == "no"]),
+         pval = wilcox.test(fold_log2_prop ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+timepoint1_log2fold_sig.cytof.grouped_responders_list <- Wilcoxon.timepoint1.cytof_log2fold_immune.groups_responders %>%
+  filter(pval < 0.05)
+
+# Non responder differences by age status
+Wilcoxon.timepoint1.cytof_prop_immune.groups_non.responders <- timepoint1_cytof_clinical_age.orr_immune_groups_non.responders  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_aged = median(proportion[age65_status == "yes"]),
+         median_young = median(proportion[age65_status == "no"]),
+         std_aged = sd(proportion[age65_status == "yes"]),
+         std_young = sd(proportion[age65_status == "no"]),
+         pval = wilcox.test(proportion ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+timepoint1_prop_sig.cytof.grouped_non.responders_list <- Wilcoxon.timepoint1.cytof_prop_immune.groups_non.responders %>%
+  filter(pval < 0.05) %>%
+  filter(!immune_cell == "UA")
+
+Wilcoxon.timepoint1.cytof_log2fold_immune.groups_non.responders <- timepoint1_cytof_clinical_age.orr_immune_groups_non.responders  %>%
+  filter(!is.na(proportion)) %>%
+  group_by(immune_cell) %>%
+  transmute(median_aged = median(fold_log2_prop[age65_status == "yes"]),
+         median_young = median(fold_log2_prop[age65_status == "no"]),
+         std_aged = sd(fold_log2_prop[age65_status == "yes"]),
+         std_young = sd(fold_log2_prop[age65_status == "no"]),
+         pval = wilcox.test(fold_log2_prop ~ age65_status, paired = FALSE)$p.value) %>%
+  distinct(immune_cell, .keep_all = TRUE) %>%
+  ungroup() %>%
+  adjust_pvalue(.,method="fdr") %>%
+  arrange(pval) %>%
+  add_significance()
+
+timepoint1_log2fold_sig.cytof.grouped_non.responders_list <- Wilcoxon.timepoint1.cytof_log2fold_immune.groups_non.responders %>%
+  filter(pval < 0.05)
+
+# Combing prop and log2fold into significant cluster lists
+timepoint1_prop_sig.cytof.grouped_responder.status_total.list <- c(timepoint1_prop_sig.cytof.grouped_responders_list$immune_cell,
+                                                        timepoint1_prop_sig.cytof.grouped_non.responders_list$immune_cell)
+
+timepoint1_log2fold_sig.cytof.grouped_responder.status_total.list <- c(timepoint1_log2fold_sig.cytof.grouped_responders_list$immune_cell,
+                                                        timepoint1_log2fold_sig.cytof.grouped_non.responders_list$immune_cell)
+
+
+```
+
+```{r}
+baseline_paired_prop <- baseline_cytof_age.orr_immune_groups %>%
+  group_by(immune_cell) %>%
+  wilcox_test(proportion ~ orr.age.status, paired = FALSE, p.adjust.method = "none") %>%
+  select(!p.adj:p.adj.signif) %>%
+  filter(p <0.05)
+
+timepoint1_paired_prop <- timepoint1_cytof_clinical_age65.response_immune_groups %>%
+  group_by(immune_cell) %>%
+  wilcox_test(proportion ~ orr.age.status, paired = FALSE, p.adjust.method = "none") %>%
+  select(!p.adj:p.adj.signif) %>%
+  filter(p <0.05)
+
+timepoint1_paired_log2fold <- timepoint1_cytof_clinical_age65.response_immune_groups %>%
+  group_by(immune_cell) %>%
+  wilcox_test(fold_log2_prop ~ orr.age.status, paired = FALSE, p.adjust.method = "none") %>%
+  select(!p.adj:p.adj.signif) %>%
+  filter(p <0.05)
+```
+
+
+## Plots
+### Figure 2A: Baseline cytokines
+All cytokines ranked by p value (Log2 concentration)
+
+```{r,echo = FALSE,fig.width = 16, fig.height = 6, warning = FALSE, message = FALSE}
+SASP_cyt <- c("il-1a","il-1b","il-6","il-8","il-13","il-15","il-18","tnfa","ifng","mcp-1","mip-1a","mig","ip-10","g-csf","gm-csf")
+
+cyt_facet_list = c("il-1a" = paste0("IL-1",greeks("alpha")),
+                "il-1b" = paste0("IL-1",greeks("beta")), 
+                "il-6" = "IL-6","il-8" = "IL-8", 
+                "il-13" = "IL-13", "il-15" = "IL-15",
+                "il-18" = "IL-18", 
+                "tnfa" = paste0("TNF-",greeks("alpha")),
+                "ifng" = paste0("IFN-",greeks("gamma")), 
+                "mcp-1" = "CCL2",
+                "mip-1a" = "CCL3","mig" = "CXCL9",
+                "ip-10" = "CXCL10", "g-csf" = "G-CSF",
+                "gm-csf" = "GM-CSF")
+
+cyt_order_pvalue <- Wilcoxon.baseline.cytokines_age65status$cytokines
+
+demo_baseline_cyt_log2_age.status$cytokines <- factor(demo_baseline_cyt_log2_age.status$cytokines,
+                                                      levels = cyt_order_pvalue)
+
+baseline_age65.status_conc_SASP_boxplot <- two.color.input_cyt_boxplot_fxn(demo_baseline_cyt_log2_age.status,
+                                                                                      'log2_average_baseline_conc', 'age65_status', cyt_list =SASP_cyt, 
+                                                                                      facet_names = c("il-1a" = paste0("IL-1",greeks("alpha")),
+                                                                                                      "il-1b" = paste0("IL-1",greeks("beta")), 
+                                                                                                      "il-6" = "IL-6","il-8" = "ILL-8", 
+                                                                                                      "il-13" = "IL-13", "il-15" = "IL-15",
+                                                                                                      "il-18" = "IL-18", 
+                                                                                                      "tnfa" = paste0("TNF-",greeks("alpha")),
+                                                                                                      "ifng" = paste0("IFN-",greeks("gamma")), 
+                                                                                                      "mcp-1" = "CCL2",
+                                                                                                      "mip-1a" = "CCL3","mig" = "CXCL9",
+                                                                                                      "ip-10" = "CXCL10", "g-csf" = "G-CSF",
+                                                                                                      "gm-csf" = "GM-CSF"),
+                                                                           pal_list = color_pal) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")),
+                     label = "p.format",
+                     bracket.size = 0.5, 
+                     size = 4,
+                     method = "wilcox.test",
+                     symnum.args = list(cutpoints = c(0,0.06,0.08,1),
+                                        symbols = c("P = 0.06", "P = 0.08", "P > 0.1"))
+                     ) +
+  facet_wrap(~cytokines, scales = "free", ncol = 8, labeller = labeller(cytokines = cyt_facet_list)) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.background = element_blank(),
+        ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(baseline_age65.status_conc_SASP_boxplot)
+```
+
+### Figure 2C: On treatment cytokine
+Significant cytokines by age status (Log2 fold change)
+
+```{r,echo = FALSE,fig.width = 3, fig.height = 3, warning = FALSE, message = FALSE}
+
+# Individual cytokine figures for publication
+
+on.treatment_age65_status_il10_cyt.log2fold_boxplot <- two.color.input_cyt_boxplot_fxn(demo_cyt_change_timepoint1_age.status, 'fold_log2', 'age65_status', c("il-10"), facet_names = c("il-10" = "IL-10"), pal_list = color_pal) +
+  scale_y_continuous(limits = c(-7, 5), breaks = seq(-7,5, by = 2)) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(title = "IL-10",
+       y = expression(Log[2] ~ "fold change"),
+       x = "" 
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, label.y = 4, size = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(on.treatment_age65_status_il10_cyt.log2fold_boxplot)
+
+on.treatment_age65_status_il12p40_cyt.log2fold_boxplot <- two.color.input_cyt_boxplot_fxn(demo_cyt_change_timepoint1_age.status, 'fold_log2', 'age65_status', c("il-12(p40)"), facet_names = c("il-12(pt40)" = "IL-12(p40)"), pal_list = color_pal) +
+  scale_y_continuous(limits = c(-8, 6), breaks = seq(-8,6, by = 2)) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(title = "IL-12(p40)",
+       y = expression(Log[2] ~ "fold change"),
+       x = "" 
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, label.y = 5, size = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(on.treatment_age65_status_il12p40_cyt.log2fold_boxplot)
+
+on.treatment_age65_status_il15_cyt.log2fold_boxplot <- two.color.input_cyt_boxplot_fxn(demo_cyt_change_timepoint1_age.status, 'fold_log2', 'age65_status', c("il-15"), facet_names = c("il-15" = "IL-15"), pal_list = color_pal) +
+  scale_y_continuous(limits = c(-9, 3), breaks = seq(-9,3, by = 3)) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(title = "IL-15",
+       y = expression(Log[2] ~ "fold change"),
+       x = "" 
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, label.y = 2, size = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(on.treatment_age65_status_il15_cyt.log2fold_boxplot)
+
+on.treatment_age65_status_il18_cyt.log2fold_boxplot <- two.color.input_cyt_boxplot_fxn(demo_cyt_change_timepoint1_age.status, 'fold_log2', 'age65_status', c("il-18"), facet_names = c("il-18" = "IL-18"), pal_list = color_pal) +
+  scale_y_continuous(limits = c(-4, 10), breaks = seq(-4,10, by = 2)) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(title = "IL-18",
+       y = expression(Log[2] ~ "fold change"),
+       x = "" 
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, label.y = 9, size = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(on.treatment_age65_status_il18_cyt.log2fold_boxplot)
+
+on.treatment_age65_status_mcp1_cyt.log2fold_boxplot <- two.color.input_cyt_boxplot_fxn(demo_cyt_change_timepoint1_age.status, 'fold_log2', 'age65_status', c("mcp-1"), facet_names = c("mcp-1" = "CCL2"), pal_list = color_pal) +
+  scale_y_continuous(limits = c(-6, 6), breaks = seq(-6,6, by = 2)) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(title = "CCL2",
+       y = expression(Log[2] ~ "fold change"),
+       x = "" 
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, label.y = 5, size = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(on.treatment_age65_status_mcp1_cyt.log2fold_boxplot)
+
+```
+
+### Figure 3C: Baseline CyTOF
+All grouped clusters by age status ranked by pvalue (Cell Proportion)
+
+```{r,echo = FALSE,fig.width = 10, fig.height = 10, warning = FALSE, message = FALSE}
+cytof_cluster_grouped_facet.list <- c("B"="B","DNT"="DNT","Myeloid"="Myeloid","NK"="NK",
+                                      "TcCM"="TcCM","TcEFF"="TcEFF","TcEM"="TcEM","TcN"="TcN",
+                                      "Th17"="Th17","Th2"="Th2","Th2CM"="Th2CM","Th2EM"="Th2EM",
+                                      "ThCTL"="ThCTL","ThN"="ThN","Treg"="Treg")
+
+baseline_cytof_clinical_age.status_immune_groups_for.faceted.plot <- baseline_cytof_clinical_age.status_immune_groups
+
+baseline_cytof_clinical_age.status_immune_groups_for.faceted.plot$immune_cell <- factor(baseline_cytof_clinical_age.status_immune_groups_for.faceted.plot$immune_cell,
+                                                      levels = baseline_pval.ranked_cytof.grouped_list_rmv_UA$immune_cell)
+
+baseline_age65.status_grouped.clusters_cytof.prop_boxplot <- two.color.input_cytof_boxplot_fxn(baseline_cytof_clinical_age.status_immune_groups_for.faceted.plot, 'proportion', 'age65_status', baseline_pval.ranked_cytof.grouped_list_rmv_UA$immune_cell, facet_names = cytof_cluster_grouped_facet.list, pal_list = color_pal) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(y = "Proportion (%)",
+       x = "",
+       colour = "Age status"
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), 
+                     bracket.size = 0.5, 
+                     size = 5) +
+  facet_wrap(~immune_cell, scales = "free", ncol = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.background = element_blank(),
+        ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(baseline_age65.status_grouped.clusters_cytof.prop_boxplot)
+```
+
+### Figure 3D: On treatment CyTOF
+All grouped clusters by age status ranked by pvalue (Cell Proportion)
+
+```{r,echo = FALSE,fig.width = 10, fig.height = 10, warning = FALSE, message = FALSE}
+cytof_cluster_grouped_facet.list <- c("B"="B","DNT"="DNT","Myeloid"="Myeloid","NK"="NK",
+                                      "TcCM"="TcCM","TcEFF"="TcEFF","TcEM"="TcEM","TcN"="TcN",
+                                      "Th17"="Th17","Th2"="Th2","Th2CM"="Th2CM","Th2EM"="Th2EM",
+                                      "ThCTL"="ThCTL","ThN"="ThN","Treg"="Treg")
+
+timepoint1_cytof_clinical_age.status_immune_groups_for.faceted.plot <- timepoint1_cytof_clinical_age.status_immune_groups
+
+timepoint1_cytof_clinical_age.status_immune_groups_for.faceted.plot$immune_cell <- factor(timepoint1_cytof_clinical_age.status_immune_groups_for.faceted.plot$immune_cell,
+                                                      levels = on.treatment_prop_pval.ranked_cytof.grouped_list_rmv_UA$immune_cell)
+
+timepoint1_age65.status_grouped.clusters_cytof.prop_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age.status_immune_groups_for.faceted.plot, 'proportion', 'age65_status', on.treatment_prop_pval.ranked_cytof.grouped_list_rmv_UA$immune_cell, facet_names = cytof_cluster_grouped_facet.list, pal_list = color_pal) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(y = "Proportion (%)",
+       x = "",
+       colour = "Age status"
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), 
+                     bracket.size = 0.5, 
+                     size = 5) +
+  facet_wrap(~immune_cell, scales = "free", ncol = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.background = element_blank(),
+        ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(timepoint1_age65.status_grouped.clusters_cytof.prop_boxplot)
+```
+
+### Figure 4A: Baseline CyTOF
+Significant grouped clusters by age and response status (Cell Proportion)
+
+```{r,echo = FALSE,fig.width = 4, fig.height = 3.5, warning = FALSE, message = FALSE}
+
+my_comparisons_baseline_old_age65.response = list(c("RO", "NRO"))
+
+my_comparisons_baseline_young_age65.response = list(c("RY", "NRY"))
+
+my_factor_age65.response_status <- factor(c("Young\nresponder", "Young\nnon-responder","Aged\nresponder", "Aged\nnon-responder"), 
+                    levels = c("Young\nresponder", "Young\nnon-responder","Aged\nresponder", "Aged\nnon-responder"))
+
+
+# TcEFF
+
+baseline_age65.response_TcEFF_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(baseline_cytof_age.orr_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("TcEFF"), facet_names = c("TcEFF" = "TcEFF"), pal= color_nat.banff) +    
+  scale_y_continuous(limits = c(0,50),
+                     breaks = seq(0,50, by = 10)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_baseline_old_age65.response, aes(label = after_stat(p.signif)), label.y = 42, bracket.size = 0.5, size = 4) +
+  labs(title = "TcEFF", 
+       y = 'Proportion (%)',
+       x = ""
+       ) +
+  theme(axis.text.x=element_text(size =9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(baseline_age65.response_TcEFF_cytof.group.prop_boxplot)
+
+# Th1
+
+baseline_age65.response_Th1_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(baseline_cytof_age.orr_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("ThCTL"), facet_names = c("ThCTL" = "ThCTL"), pal= color_nat.banff) +    
+  scale_y_continuous(limits = c(0,35),
+                     breaks = seq(0,35, by = 5)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_baseline_old_age65.response, aes(label = after_stat(p.signif)), label.y = 33,bracket.size = 0.5, size = 4) +
+  labs(title = "ThCTL", 
+       y = 'Proportion (%)',
+       x = ""
+       ) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(baseline_age65.response_Th1_cytof.group.prop_boxplot)
+
+# NK
+
+baseline_age65.response_NK_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(baseline_cytof_age.orr_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("NK"), facet_names = c("NK" = "NK"), pal= color_nat.banff) +    
+  scale_y_continuous(limits = c(0,50),
+                    breaks = seq(0,50, by = 10)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_baseline_young_age65.response, aes(label = after_stat(p.signif)), label.y = 42,bracket.size = 0.5, size = 4) +
+  labs(title = "NK", 
+       y = 'Proportion (%)',
+       x = ""
+       ) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(baseline_age65.response_NK_cytof.group.prop_boxplot)
+```
+
+### Figure 4B: On treatment CyTOF
+Significant grouped clusters by age and response status (Cell Proportion)
+
+```{r,echo = FALSE,fig.width = 4, fig.height = 3.5, warning = FALSE, message = FALSE}
+
+my_comparisons_timepoint1_old_age65.response = list(c("RO", "NRO"))
+
+my_comparisons_timepoint1_young_age65.response = list(c("RY", "NRY"))
+
+
+# Th2CM
+
+timepoint1_age65.response_Th2CM_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("Th2CM"), facet_names = c("Th2CM" = "Th2CM"), pal_list = color_nat.banff) +    
+  scale_y_continuous(limits = c(0,42),
+                     breaks = seq(0,42, by = 5)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response, aes(label = after_stat(p.signif)), label.y = 40, bracket.size = 0.5, size = 4) +
+  labs(title = "Th2CM", 
+       y = 'Proportion (%)',
+       x = "" 
+       ) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_Th2CM_cytof.group.prop_boxplot)
+
+
+# TcEFF
+
+timepoint1_age65.response_TcEFF_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("TcEFF"), facet_names = c("TcEFF" = "TcEFF"), pal_list = color_nat.banff) +    
+  scale_y_continuous(limits = c(0,65),
+                     breaks = seq(0,65, by = 10)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response, aes(label = after_stat(p.signif)), label.y = 60,bracket.size = 0.5, size = 4) +
+  labs(title = "TcEFF", 
+       y = 'Proportion (%)',
+       x = "" 
+       ) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_TcEFF_cytof.group.prop_boxplot)
+
+# ThCTL
+
+timepoint1_age65.response_Th1_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("ThCTL"), facet_names = c("ThCTL" = "ThCTL"), pal_list = color_nat.banff) +    
+  scale_y_continuous(limits = c(0,35),
+                     breaks = seq(0,35, by = 5)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response, aes(label = after_stat(p.signif)),label.y = 33,bracket.size = 0.5, size = 4) +
+  labs(title = "ThCTL", 
+       y = 'Proportion (%)',
+       x = "" 
+       ) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_Th1_cytof.group.prop_boxplot)
+
+# NK
+
+timepoint1_age65.response_NK_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("NK"), facet_names = c("NK" = "NK"), pal_list = color_nat.banff) +    
+  scale_y_continuous(limits = c(0,55),
+                     breaks = seq(0,55, by = 10)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_young_age65.response, aes(label = after_stat(p.signif)), label.y = 50,bracket.size = 0.5, size = 4) +
+  labs(title = "NK", 
+       y = 'Proportion (%)',
+       x = "" 
+       ) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_NK_cytof.group.prop_boxplot)
+
+# ThEM
+
+timepoint1_age65.response_Th2EM_cytof.group.prop_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 
+                                                                           'proportion', 'orr.age.status', c("Th2EM"), facet_names = c("Th2EM" = "Th2EM"), pal_list = color_nat.banff) +    
+  scale_y_continuous(limits = c(0,14),
+                     breaks = seq(0,14, by = 2)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_young_age65.response, aes(label = after_stat(p.signif)), label.y = 12.5,bracket.size = 0.5, size = 4) +
+  labs(title = "Th2EM", 
+       y = 'Proportion (%)',
+       x = "" 
+       ) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_Th2EM_cytof.group.prop_boxplot)
+```
+
+### Figure 4B: On treatment CyTOF
+Significant grouped clusters by age and response status (Log2 fold change)
+
+```{r,echo = FALSE,fig.width = 4, fig.height = 3.5, warning = FALSE, message = FALSE}
+my_comparisons_timepoint1_old_age65.response = list(c("RO", "NRO"))
+
+my_comparisons_timepoint1_young_age65.response = list(c("RY", "NRY"))
+
+my_comparisons_timepoint1_non.responder = list(c("NRY", "NRO"))
+
+# Myeloid
+timepoint1_age65.response_myeloid_cytof.log2fold_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 'fold_log2_prop','orr.age.status', c("Myeloid"), facet_names = c("Myeloid" = "Myeloid"), pal_list = color_nat.banff) +
+  scale_y_continuous(limits = c(-4, 6), breaks = seq(-4,6, by = 2)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  labs(title = "Myeloid",
+       y = expression(Log[2] ~ "fold change"),
+       x = ""
+       ) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response,
+                     aes(label = after_stat(p.signif)), bracket.size = 0.5, 
+                     label.y = 4, 
+                     size = 5) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_myeloid_cytof.log2fold_boxplot)
+
+# TcCM
+timepoint1_age65.response_TcCM_cytof.log2fold_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 'fold_log2_prop','orr.age.status', c("TcCM"), facet_names = c("TcCM" = "TcCM"), pal_list = color_nat.banff) +
+  scale_y_continuous(limits = c(-2, 3), breaks = seq(-2,3, by = 1)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  labs(title = "TcCM",
+       y = expression(Log[2] ~ "fold change"),
+       x = ""
+       ) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response,
+                     aes(label = after_stat(p.signif)), bracket.size = 0.5, 
+                     label.y = 2.3, 
+                     size = 5) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_TcCM_cytof.log2fold_boxplot)
+
+# TcEFF
+timepoint1_age65.response_TcEFF_cytof.log2fold_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 'fold_log2_prop','orr.age.status', c("TcEFF"), facet_names = c("TcEFF" = "TcEFF"), pal_list = color_nat.banff) +
+  scale_y_continuous(limits = c(-2, 4), breaks = seq(-2,4, by = 1)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  labs(title = "TcEFF",
+       y = expression(Log[2] ~ "fold change"),
+       x = ""
+       ) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response,
+                     aes(label = after_stat(p.signif)), bracket.size = 0.5, 
+                     label.y = 2.5, 
+                     size = 5) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_TcEFF_cytof.log2fold_boxplot)
+
+# TcEM
+timepoint1_age65.response_TcEM_cytof.log2fold_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 'fold_log2_prop','orr.age.status', c("TcEM"), facet_names = c("TcEM" = "TcEM"), pal_list = color_nat.banff) +
+  scale_y_continuous(limits = c(-3, 3), breaks = seq(-3,3, by = 1)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  labs(title = "TcEM",
+       y = expression(Log[2] ~ "fold change"),
+       x = ""
+       ) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response,
+                     aes(label = after_stat(p.signif)), bracket.size = 0.5, 
+                     label.y = 2.5, 
+                     size = 5) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_TcEM_cytof.log2fold_boxplot)
+
+# Th2CM
+timepoint1_age65.response_Th2CM_cytof.log2fold_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 'fold_log2_prop','orr.age.status', c("Th2CM"), facet_names = c("Th2CM" = "Th2CM"), pal_list = color_nat.banff) +
+  scale_y_continuous(limits = c(-2, 3), breaks = seq(-2,3, by = 1)) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  labs(title = "Th2CM",
+       y = expression(Log[2] ~ "fold change"),
+       x = ""
+       ) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_old_age65.response,
+                     aes(label = after_stat(p.signif)), bracket.size = 0.5, 
+                     label.y = 2.2, 
+                     size = 5) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_blank(), strip.background = element_blank())
+
+print(timepoint1_age65.response_Th2CM_cytof.log2fold_boxplot)
+
+```
+
+### On treatment CyTOF: Non-responder log2 fold changes
+
+```{r}
+my_comparisons_timepoint1_non.responder = list(c("NRY", "NRO"))
+
+timepoint1_non.responder_age.status_cytof.log2fold_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_cytof_clinical_age65.response_immune_groups, 'fold_log2_prop','orr.age.status', c("Treg","Th2","Th17"), facet_names = c("Treg" = "Treg","Th2" = "Th2", "Th17" = "Th17"), pal_list = color_nat.banff) +
+  scale_x_discrete(labels = my_factor_age65.response_status) +
+  labs(y = expression(Log[2] ~ "fold change"),
+       x = ""
+       ) +
+  stat_compare_means(comparisons = my_comparisons_timepoint1_non.responder,
+                     aes(label = after_stat(p.signif)), bracket.size = 0.5, 
+                     size = 5) +
+  theme(axis.text.x=element_text(size = 9),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size =14), strip.background = element_blank()) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(timepoint1_non.responder_age.status_cytof.log2fold_boxplot)
+```
+
+
+### Extended data figure 1A: Baseline cytokines
+Wilcoxon analysis differences between two cancer groups (Log2 concentration)
+
+```{r,echo = FALSE, fig.width = 4, fig.height = 4, warning = FALSE, message = FALSE}
+# list of significant comparisons for adding brackets
+mig_comparisons <- list(c("HCC","RCC"))
+
+il8_comparisons <- list(c("HCC","RCC"),c("HCC","BC"),c("HCC","HNC"))
+
+il13_comparisons <- list(c("HCC","RCC"))
+
+il17f_comparisons <- list(c("RCC","BC"),c("RCC","HNC"))
+
+gmcsf_comparisons <- list(c("HCC","BC"))
+
+rantes_comparisons <- list(c("HCC","HNC"),c("RCC","HNC"))
+
+ip10_comparisons <- list(c("HCC","RCC"),c("HCC","BC"),c("BC","HNC"))
+
+vegfa_comparisons <- list(c("HCC","RCC"))
+
+custom_baseline_boxplot_il6_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("il-6"),
+                                                              facet_names = c("il-6" = "IL-6")) +
+  scale_color_manual(values = colors) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  scale_y_continuous(limits = c(-2,8), breaks = seq(-2,8, by = 2)) 
+
+print(custom_baseline_boxplot_il6_cancer.group.age.status)
+
+custom_baseline_boxplot_mig_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("mig"),
+                                                              facet_names = c("mig" = "CXCL9")) +
+  scale_color_manual(values = colors ) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = mig_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(0,16), breaks = seq(0,16, by = 4)) 
+
+print(custom_baseline_boxplot_mig_cancer.group.age.status)
+
+custom_baseline_boxplot_il8_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("il-8"),
+                                                              facet_names = c("il-8" = "IL-8")) +
+  scale_color_manual(values = colors ) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = il8_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(-2,13), breaks = seq(-2,10, by = 2)) 
+
+print(custom_baseline_boxplot_il8_cancer.group.age.status)
+
+custom_baseline_boxplot_il13_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("il-13"),
+                                                              facet_names = c("il-13" = "IL-13")) +
+  scale_color_manual(values = colors) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = il13_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(0,16), breaks = seq(0,16, by = 4)) 
+
+print(custom_baseline_boxplot_il13_cancer.group.age.status)
+
+custom_baseline_boxplot_il17f_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("il-17f"),
+                                                              facet_names = c("il-17f" = "IL-17f")) +
+  scale_color_manual(values = colors ) +   
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = il17f_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(0,18), breaks = seq(0,16, by = 4)) 
+
+print(custom_baseline_boxplot_il17f_cancer.group.age.status)
+
+custom_baseline_boxplot_gmcsf_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("gm-csf"),
+                                                              facet_names = c("gm-csf" = "GM-CSF")) +
+  scale_color_manual(values = colors ) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = gmcsf_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(0,14), breaks = seq(0,12, by = 3)) 
+
+print(custom_baseline_boxplot_gmcsf_cancer.group.age.status)
+
+custom_baseline_boxplot_rantes_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("rantes"),
+                                                              facet_names = c("rantes" = "CCL5")) +
+  scale_color_manual(values = colors ) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = rantes_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(0,15), breaks = seq(0,15, by = 3)) 
+
+print(custom_baseline_boxplot_rantes_cancer.group.age.status)
+
+custom_baseline_boxplot_ip10_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("ip-10"),
+                                                              facet_names = c("ip-10" = "CXCL10")) +
+  scale_color_manual(values = colors) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = ip10_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(0,16), breaks = seq(0,16, by = 4)) 
+
+print(custom_baseline_boxplot_ip10_cancer.group.age.status)
+
+custom_baseline_boxplot_vegfa_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type", c("vegf-a"),
+                                                              facet_names = c("vegf-a" = "VEGF-a")) +
+  scale_color_manual(values = colors) +  
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  stat_compare_means(comparisons = vegfa_comparisons, aes(label = after_stat(p.signif)), bracket.size = 0.5, size = 5) +
+  scale_y_continuous(limits = c(0,9), breaks = seq(0,8, by = 2)) 
+
+print(custom_baseline_boxplot_vegfa_cancer.group.age.status)
+```
+
+### Extended data figure 1B: Baseline cytokines
+Kruskal wallis analysis between four cancer groups (Log2 concentration)
+
+```{r,echo = FALSE,fig.width = 10, fig.height = 3, warning = FALSE, message = FALSE}
+# Boxplots for significant cytokines utilizing Kruskal Wallis test comparing between four cancer types
+baseline_sig_cancer.group_age.status_boxplot <- boxplot_sig.cyt_kruskal_fxn(baseline_cancer.group,
+                                                                            'log2_average_baseline_conc',
+                                                                            'cancer_type')[[1]] +
+  scale_color_manual(name = "Cancer type",values = colors, labels = baseline_cancer.group_label)+
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        #axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        ) +
+  facet_wrap(~ `cytokines`, scales = "free", labeller = labeller(cytokines = c("il-17f" = "IL-17f", "ip-10" = "CXCL10","il-8"="IL-8"))) +
+  stat_compare_means(label.x = 2,method = "kruskal.test", size =3, label.y = 16) +
+  scale_y_continuous(limits = c(-2,17), breaks = seq(-2,16, by = 2)) 
+
+print(baseline_sig_cancer.group_age.status_boxplot)
+```
+
+
+### Extended data figure 1C: Baseline cytokines
+IL-6 and CXCL9 by cancer and age status (Log2 concentration)
+
+```{r,echo = FALSE,fig.width = 8, fig.height = 3, warning = FALSE, message = FALSE}
+
+# IL-6 and CXCL9 by cancer group and age status
+custom_baseline_boxplot_cancer.group.age.status <- baseline_cancer.group %>%
+  multi_color_two.grouping.variables_boxplot_fxn(., 'log2_average_baseline_conc', "cancer_type","age65_status", c("il-6","mig"),
+                                                              facet_names = c("il-6" = "IL-6", "mig" = "CXCL9")) +
+  scale_color_manual(values = color_pal, labels= c(age_less_65, age_greater.equal_65))+
+  scale_x_discrete(labels = baseline_cancer.group_label) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "",
+       colour = "Age status"
+       ) +
+  theme(axis.title.x = element_text(size = 12),
+        #axis.text.x = element_blank(),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.text = element_text(size = 14), 
+        strip.background = element_blank(),
+        legend.position = "right",
+        legend.text = element_text(size = 8),
+        legend.background = element_blank(),
+        legend.key = element_blank()
+        ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(custom_baseline_boxplot_cancer.group.age.status)
+
+```
+
+### Extended Figure 2C: On treatment 
+Significant cytokines by age status (Log2 concentration)
+
+```{r,echo = FALSE,fig.width = 4, fig.height = 6, warning = FALSE, message = FALSE}
+
+on.treatment_age65.status_log2conc_boxplot <- two.color.input_cyt_boxplot_fxn(demo_cyt_change_timepoint1_age.status, 'log2_conc', 'age65_status', on.treatment_sig.cyt_conc_list$cytokines, facet_names = c("il-18" = "IL-18", "mcp-1" = "CCL2","g-csf" = "G-CSF","rantes" = "CCL5"), pal_list = color_pal) +
+  scale_y_continuous(limits = c(0, 15, breaks = seq(0,15, by = 3))) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(y = expression(Log[2] ~ "Concentration (pg/mL)"),
+       x = "" 
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), 
+                     bracket.size = 0.5, 
+                     label.y = 14,
+                     tip.length = 0.05,
+                     size = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.background = element_blank())
+
+print(on.treatment_age65.status_log2conc_boxplot)
+```
+
+### Extended Figure 3B: Baseline CyTOF 
+Significant Individual clusters by age status  (Cell Proportion)
+
+```{r,echo = FALSE,fig.width = 8, fig.height = 6, warning = FALSE, message = FALSE}
+baseline_age65.status_individual.clusters_cytof.prop_boxplot <- two.color.input_cytof_boxplot_fxn(baseline_cytof_clinical_age.status, 'proportion', 'age65_status', c("B_I","DNT_II","NK_II","TcN","ThN"), facet_names = c("B_I" = "B_I","DNT_II" = "DNT_II", "NK_II" = "NK_II","ThN" = "ThN", "TcN" = "TcN"), pal_list = color_pal) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(y = "Proportion (%)",
+       x = "",
+       colour = "Age status"
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), 
+                     bracket.size = 0.5, 
+                     size = 5) +
+  facet_wrap(~immune_cell, scales = "free", ncol = 3) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.background = element_blank(),
+        ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(baseline_age65.status_individual.clusters_cytof.prop_boxplot)
+```
+
+### Extended Figure 3C: On treatment CyTOF 
+Significant Individual clusters by age status (Cell proportion)
+
+```{r,echo = FALSE,fig.width = 6, fig.height = 10, warning = FALSE, message = FALSE}
+on.treatment_age65.status_individual.clusters_cytof.prop_boxplot <- two.color.input_cytof_boxplot_fxn(total_cytof_change_timepoint1_age.status, 'proportion', 'age65_status', on.treatment_sig.cytof.individual_list$immune_cell, facet_names = c("B_I" = "B_I","DNT_I" = "DNT_I","DNT_II" = "DNT_II","NK_I" = "NK_I","NK_II" = "NK_II", "TcN" = "TcN","ThN"="ThN"), pal_list = color_pal) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(y = "Proportion (%)",
+       x = "",
+       colour = "Age status"
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), 
+                     bracket.size = 0.5, 
+                     size = 5) +
+  facet_wrap(~immune_cell, scales = "free", ncol = 3) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.background = element_blank(),
+        ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(on.treatment_age65.status_individual.clusters_cytof.prop_boxplot)
+
+```
+
+### Extended Figure 3D: On treatment CyTOF 
+All grouped clusters ranked by p value (Log2 fold change)
+
+```{r,echo = FALSE,fig.width = 10, fig.height = 10, warning = FALSE, message = FALSE}
+cytof_cluster_grouped_facet.list <- c("B"="B","DNT"="DNT","Myeloid"="Myeloid","NK"="NK",
+                                      "TcCM"="TcCM","TcEFF"="TcEFF","TcEM"="TcEM","TcN"="TcN",
+                                      "Th17"="Th17","Th2"="Th2","Th2CM"="Th2CM","Th2EM"="Th2EM",
+                                      "ThCTL"="ThCTL","ThN"="ThN","Treg"="Treg")
+
+timepoint1_log2fold_cytof_clinical_age.status_immune_groups_for.faceted.plot <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  filter(!baseline_proportion == 0)
+
+timepoint1_log2fold_cytof_clinical_age.status_immune_groups_for.faceted.plot$immune_cell <- factor(timepoint1_log2fold_cytof_clinical_age.status_immune_groups_for.faceted.plot$immune_cell,
+                                                      levels = on.treatment_log2fold_pval.ranked_cytof.grouped_list_rmv_UA$immune_cell)
+
+timepoint1_age65.status_grouped.clusters_cytof.log2fold_boxplot <- two.color.input_cytof_boxplot_fxn(timepoint1_log2fold_cytof_clinical_age.status_immune_groups_for.faceted.plot, 'fold_log2_prop', 'age65_status', on.treatment_log2fold_pval.ranked_cytof.grouped_list_rmv_UA$immune_cell, facet_names = cytof_cluster_grouped_facet.list, pal_list = color_pal) +
+  scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  labs(y = expression(Log[2] ~ "fold change"),
+       x = "",
+       colour = "Age status"
+       ) +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), 
+                     bracket.size = 0.5, 
+                     size = 5) +
+  facet_wrap(~immune_cell, scales = "free", ncol = 5) +
+  theme(axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        plot.title = element_text(size = 12),
+        strip.background = element_blank(),
+        ) +
+  scale_y_continuous(expand = expansion(mult = c(0.1)))
+
+print(timepoint1_age65.status_grouped.clusters_cytof.log2fold_boxplot)
+```
+
+
+### Plot saving
+
+```{r,echo = FALSE, warning = FALSE, message = FALSE}
+# Figure 2A
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Baseline_cytokines_age65.status.pdf"), 
+       plot = baseline_age65.status_conc_SASP_boxplot, 
+       height = 6, width = 16,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Figure 2C
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.treatment_il10_age65.status.pdf"), 
+       plot = on.treatment_age65_status_il10_cyt.log2fold_boxplot, 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.treatment_il12p40_age65.status.pdf"), 
+       plot = on.treatment_age65_status_il12p40_cyt.log2fold_boxplot, 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.treatment_il15_age65.status.pdf"), 
+       plot = on.treatment_age65_status_il15_cyt.log2fold_boxplot, 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.treatment_il18_age65.status.pdf"), 
+       plot = on.treatment_age65_status_il18_cyt.log2fold_boxplot, 
+       height = 3, width = 3,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.treatment_mcp1_age65.status.pdf"), 
+       plot = on.treatment_age65_status_mcp1_cyt.log2fold_boxplot, 
+       height = 3, width = 2,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Figure 3C
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_grouped_prop_all.clusters_pval.ranked_age65.status.pdf"), 
+       plot = baseline_age65.status_grouped.clusters_cytof.prop_boxplot, 
+       height = 10, width = 10,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Figure 3D
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "on.treatment_grouped_prop_all.clusters_pval.ranked_age65.status.pdf"), 
+       plot = timepoint1_age65.status_grouped.clusters_cytof.prop_boxplot, 
+       height = 10, width = 10,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Figure 4A
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Baseline_TcEFF_age65.response.pdf"), 
+       plot = baseline_age65.response_TcEFF_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Baseline_Th1_age65.response.pdf"), 
+       plot = baseline_age65.response_Th1_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Baseline_NK_age65.response.pdf"), 
+       plot = baseline_age65.response_NK_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_Th2CM_age65.response.pdf"), 
+       plot = timepoint1_age65.response_Th2CM_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Figure 4B
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_TcEFF_age65.response.pdf"), 
+       plot = timepoint1_age65.response_TcEFF_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_Th1_age65.response.pdf"), 
+       plot = timepoint1_age65.response_Th1_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_NK_age65.response.pdf"), 
+       plot = timepoint1_age65.response_NK_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_Th2EM_age65.response.pdf"), 
+       plot = timepoint1_age65.response_Th2EM_cytof.group.prop_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Figure 4C
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_log2fold_myeloid_age65.response.pdf"), 
+       plot = timepoint1_age65.response_myeloid_cytof.log2fold_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_log2fold_TcCM_age65.response.pdf"), 
+       plot = timepoint1_age65.response_TcCM_cytof.log2fold_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_log2fold_TcEFF_age65.response.pdf"), 
+       plot = timepoint1_age65.response_TcEFF_cytof.log2fold_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_log2fold_TcEM_age65.response.pdf"), 
+       plot = timepoint1_age65.response_TcEM_cytof.log2fold_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.Treatment_log2fold_Th2CM_age65.response.pdf"), 
+       plot = timepoint1_age65.response_Th2CM_cytof.log2fold_boxplot, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Extended Figure 1
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_sig_cytokine_kruskal_cancer.type.pdf"), 
+       plot = baseline_sig_cancer.group_age.status_boxplot, 
+       height = 3, width = 10,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_il6_mig_cancer.type_age.status.pdf"), 
+       plot = custom_baseline_boxplot_cancer.group.age.status, 
+       height = 3, width = 8,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_il6_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_il6_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_il8_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_il8_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_mig_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_mig_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_il13_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_il13_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_rantes_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_rantes_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_ip10_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_ip10_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_vegfa_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_vegfa_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_il17f_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_il17f_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_gmcsf_cancer.type.pdf"), 
+       plot = custom_baseline_boxplot_gmcsf_cancer.group.age.status, 
+       height = 4, width = 4,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Extended Figure 2C
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "On.treatment_cytokines_extended.fig_age65.status.pdf"), 
+       plot = on.treatment_age65.status_log2conc_boxplot, 
+       height = 6, width = 6,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Extended Figure 3B
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Baseline_individual.clusters_prop_extended.figure_age65.status.pdf"), 
+       plot = baseline_age65.status_individual.clusters_cytof.prop_boxplot , 
+       height = 6, width = 8,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Extended Figure 3C
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "on.treatment_sig.individual.cluster_prop_extended.fig_age65.status.pdf"), 
+       plot = on.treatment_age65.status_individual.clusters_cytof.prop_boxplot, 
+       height = 10, width = 6,
+       device = cairo_pdf,
+       dpi = 600)
+
+# Extended Figure 3D
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "on.treatment_sig.grouped.cluster_log2fold_extended.fig_age65.status.pdf"), 
+       plot = timepoint1_age65.status_grouped.clusters_cytof.log2fold_boxplot, 
+       height = 10, width = 10,
+       device = cairo_pdf,
+       dpi = 600)
+```
+
+
+### Supporting data files
+
+```{r,echo = FALSE, warning = FALSE, message = FALSE}
+# Supplemental CBC analysis
+baseline_wbc_supporting.file <- clinical_baseline_lymph %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, baseline_wbc:baseline_lymph_plus_monocytes) %>%
+  filter(!is.na(baseline_wbc))
+
+write.xlsx(baseline_wbc_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_baseline_wbc_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Figure 2A
+baseline_cyt_age.status_supporting.file <- demo_baseline_cyt_log2_age.status %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, cytokines, log2_average_baseline_conc) %>%
+  ungroup() %>%
+  pivot_wider(names_from = cytokines, values_from = log2_average_baseline_conc)
+
+write.xlsx(baseline_cyt_age.status_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_baseline_log2conc_cyt_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Figure 2C
+on.treatment_sig_cyt_log2fold_supporting.file <- demo_cyt_change_timepoint1_age.status %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, cytokines, fold_log2) %>%
+  filter(cytokines %in% on.treatment_sig.cyt_conc_list$cytokines) %>%
+  ungroup() %>%
+  pivot_wider(names_from = cytokines, values_from = fold_log2)
+
+write.xlsx(on.treatment_sig_cyt_log2fold_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_on.treatment_age_sig.cyt_log2fold_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Figure 3C
+baseline_sig.grouped.immune.clusters_supporting.file <- baseline_cytof_clinical_age.status_immune_groups %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, proportion) %>%
+  filter(immune_cell %in% baseline_sig.cytof.grouped_list$immune_cell) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = proportion)
+
+write.xlsx(baseline_sig.grouped.immune.clusters_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_baseline_grouped.clusters_prop_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Figure 3D
+on.treatment_sig.grouped.immune.clusters_prop_supporting.file <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, proportion) %>%
+  filter(immune_cell %in% on.treatment_sig.cytof.grouped_list$immune_cell) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = proportion)
+
+write.xlsx(on.treatment_sig.grouped.immune.clusters_prop_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_on.treatment_grouped.clusters_prop_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+
+# Figure 4A
+baseline_sig.grouped.immune.clusters_age.response_supporting.file <- baseline_cytof_age.orr_immune_groups %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, proportion) %>%
+  filter(immune_cell %in% baseline_sig.cytof.grouped_age.response_total.list) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = proportion)
+
+write.xlsx(baseline_sig.grouped.immune.clusters_age.response_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_baseline_age.response_grouped.clusters_prop_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Figure 4B
+timepoint1_sig.grouped.immune.clusters_prop_age.response_supporting.file <- timepoint1_cytof_clinical_age65.response_immune_groups %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, proportion) %>%
+  filter(immune_cell %in% on.treatment_sig.cytof.grouped_prop_age.response_total.list) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = proportion)
+
+write.xlsx(timepoint1_sig.grouped.immune.clusters_prop_age.response_supporting.file , 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_on.treatment_age.response_grouped.clusters_prop_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Figure 4C
+timepoint1_sig.grouped.immune.clusters_log2fold_age.response_supporting.file <- timepoint1_cytof_clinical_age65.response_immune_groups %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, fold_log2_prop) %>%
+  filter(immune_cell %in% on.treatment_sig.cytof.grouped_log2fold_age.response_total.list) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = fold_log2_prop)
+
+write.xlsx(timepoint1_sig.grouped.immune.clusters_log2fold_age.response_supporting.file , 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_on.treatment_age.response_grouped.clusters_log2fold_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Extended Figure 1
+baseline_cancer.age_supporting.file <- baseline_cancer.group %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, cancer_type, cytokines, log2_average_baseline_conc) %>%
+  ungroup() %>%
+  pivot_wider(names_from = cytokines, values_from = log2_average_baseline_conc)
+
+write.xlsx(baseline_cancer.age_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_baseline_log2conc_cancer.age.status_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Extended Figure 2C
+on.treatment_sig_cyt_log2conc_supporting.file <- demo_cyt_change_timepoint1_age.status %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, cytokines, log2_conc) %>%
+  filter(cytokines %in% on.treatment_sig.cyt_conc_list$cytokines) %>%
+  ungroup() %>%
+  pivot_wider(names_from = cytokines, values_from = log2_conc)
+
+write.xlsx(on.treatment_sig_cyt_log2conc_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_on.treatment_age_sig.cyt_log2conc_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Extended Figure 3B
+baseline_sig.individual.immune.clusters_supporting.file <- baseline_cytof_clinical_age.status %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, proportion) %>%
+  filter(immune_cell %in% baseline_sig.cytof.individual_list$immune_cell) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = proportion)
+
+write.xlsx(baseline_sig.individual.immune.clusters_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_baseline_individual.clusters_prop_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Extended Figure 3C
+on.treatment_sig.individual.immune.clusters_prop_supporting.file <- total_cytof_change_timepoint1_age.status %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, proportion) %>%
+  filter(immune_cell %in% on.treatment_sig.cytof.individual_list$immune_cell) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = proportion)
+
+write.xlsx(on.treatment_sig.individual.immune.clusters_prop_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_on.treatment_individual.clusters_prop_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+# Extended Figure 3D
+on.treatment_sig.grouped.immune.clusters_log2fold_supporting.file <- timepoint1_cytof_clinical_age.status_immune_groups %>%
+  select(`pt id`, `pub_id paper`,`age on study`,age65_status, immune_cell, fold_log2_prop) %>%
+  filter(immune_cell %in% on.treatment_sig.cytof.grouped_log2fold_list$immune_cell) %>%
+  ungroup() %>%
+  pivot_wider(names_from = immune_cell, values_from = fold_log2_prop)
+
+write.xlsx(on.treatment_sig.grouped.immune.clusters_log2fold_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_on.treatment_grouped.clusters_log2fold_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+
+```
+
+### Generating supplemental tables
+
+```{r,echo = FALSE, warning = FALSE, message = FALSE}
+# Supplemental table for WBC analysis
+write.xlsx(Wilcoxon.baseline.lymphocyte_age65status, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_baseline_wbc_wilcoxon.table_supplemental.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+```

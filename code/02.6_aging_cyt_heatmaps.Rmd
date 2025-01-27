@@ -1,0 +1,872 @@
+---
+title: "Cytokine heatmaps"
+output: html_document
+date: "2024-05-23"
+---
+# Set up
+
+### Libraries
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+# Libraries
+library(here)
+library(tidyverse)
+library(ggplot2)
+library(pheatmap)
+library(viridis)
+library(ggpubr)
+library(gridExtra)
+library(wesanderson)
+library(grid)
+library(ggbreak) 
+library(ggsci)
+library(ComplexHeatmap)
+library(khroma)
+library(greekLetters)
+library(Cairo)
+library(RColorBrewer)
+library(openxlsx)
+library(readxl)
+library(circlize)
+
+```
+
+### Directory pathing
+
+```{r, results = 'hide', warning = FALSE, message = FALSE}
+here::i_am("code/02.6_aging_cyt_heatmaps.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+```
+
+### Import files
+
+```{r}
+clinical_tb <- readRDS(here("output/RDS files/clinical.rds"))
+
+clinical_cytokine_baseline <- readRDS(here("output/RDS files/demo_baseline_log2.rds"))
+
+clinical_cytokine_on.treatment_change <- readRDS(here("output/RDS files/demo_change.rds"))
+
+# baseline tibble
+clinical_cytokine_baseline_age.status <- clinical_cytokine_baseline %>%
+  ungroup() %>%
+  distinct(`pt id`, cytokines, .keep_all = TRUE)
+
+# cytokine timepoint 1 tibble
+clinical_change_timepoint1_age.status <- clinical_cytokine_on.treatment_change %>%
+  arrange(`pt id`,`blood timepoint order`) %>%
+  distinct(`pt id`, cytokines, .keep_all = TRUE) 
+
+```
+
+### Special characters for graphs
+
+```{r}
+# For >= symbol in strings
+greater_than_equal <- "\u2265"
+less_than <- "\u003c"
+
+age_greater.equal_65 <- paste0("Age ",greater_than_equal,"65")
+
+age_less_65 <- paste0("Age ",less_than,"65")
+```
+
+### Color palettes
+
+```{r}
+colors_npg <- pal_npg()(10)
+
+colors_anno_label_heatmap <- c("#544667","#C37672","#F49835","#4AB8A7","#284B96","#878787")
+
+colors_cyt_label_heatmap <- c("#544667","#C37672","#F49835","#4AB8A7","#284B96","#878787")
+
+color_pal_blu.red.yellow <- c("#084c61","#db504a","#e3b505","#4f6d7a","#56a3a6")
+
+colors <- c(pal_npg()(10))
+color_from_viridis <- viridis(1, option = "D", alpha = 1)
+color_pal_w.viridis <- c(colors[2], color_from_viridis)
+
+color_pal <- c("#15607a","#3cc4ad","#db504a","#F49835","#594F4F")
+```
+
+# Data set up and processing
+
+## Cytokine order and groupings in heatmap
+
+```{r}
+options(scipen=999)
+
+#Cytokine order
+cyt_order <- c('il-2', 'il-12(p70)', 'il-12(p40)', 'ifng', 'tnfa',
+               'il-4', 'il-5', 'il-9', 'il-13', 'il-25',
+               'il-6', 'il-17a', 'il-17f', 'il-21', 'il-22', 'il-23',
+               'il-10', 'il-35',
+               'il-8', 'itac', 'mcp-1', 'mip-1a', 'mip-1b', 'rantes', 'mip-3a', 'mpif-1', 'mig','ip-10',
+               'il-1a', 'il-1b', 'il-1ra', 'il-3','il-15', 'il-18', 'g-csf', 'gm-csf', 'baff', 'vegf-a','scd40l'
+)
+
+#Cytokine groupings
+chemokines <- c('il-8', 'itac', 'mcp-1', 'mip-1a', 'mip-1b', 'rantes', 'mip-3a', 'mpif-1', 'mig', 'ip-10')
+other <- c('il-1a', 'il-1b', 'il-1ra', 'il-3', 'il-15', 'il-18', 'g-csf', 'gm-csf', 'baff', 'vegf-a', 'scd40l')
+th2 <- c('il-4', 'il-5', 'il-9', 'il-13', 'il-25')
+treg <- c('il-10', 'il-35')
+th17 <- c('il-6', 'il-17a', 'il-17f', 'il-21', 'il-22', 'il-23')
+th1 <- c('il-2', 'il-12(p70)', 'il-12(p40)', 'ifng', 'tnfa')
+
+cyt_group_order <- c("Th1", "Th2", "Th17", "Treg","Chemokines", "Other")
+
+# Cytokine name lists for display in heatmaps
+
+# cytokine names capitalized
+cyt_names_capital <-  c("IL-2","IL-12p70","IL-12p40","IFN-g","TNF-a",
+        "IL-4","IL-5","IL-9","IL-13","IL-25",
+        "IL-6","IL-17a","IL-17f","IL-22",
+        "IL-10",
+        "IL-8","MCP-1","MIP-1a","MIP-1b","RANTES","MIG","IP-10",
+        "IL-1a","IL-1b","IL-1Ra","IL-3","IL-15","IL-18","G-CSF","GM-CSF","VEGF-A","sCD40L")
+
+# cytokine names with greek letters
+cyt_names_greek <-  c("IL-2","IL-12p70","IL-12p40",paste0("IFN-",greeks("gamma")),paste0("TNF-",greeks("alpha")),
+        "IL-4","IL-5","IL-9","IL-13","IL-25",
+        "IL-6","IL-17a","IL-17f","IL-22",
+        "IL-10",
+        "IL-8","MCP-1",paste0("MIP-1",greeks("alpha")),paste0("MIP-1",greeks("beta")),"RANTES","MIG","IP-10",
+        paste0("IL-1",greeks("alpha")),paste0("IL-1",greeks("beta")),"IL-1Ra","IL-3","IL-15","IL-18","G-CSF","GM-CSF","VEGF-A","sCD40L")
+
+# cytokine names with greek letters and use of formal name
+# Example: MIG = CXCL9
+cyt_names_greek_formal <-  c("IL-2","IL-12p70","IL-12p40",paste0("IFN-",greeks("gamma")),paste0("TNF-",greeks("alpha")),
+        "IL-4","IL-5","IL-9","IL-13","IL-25",
+        "IL-6","IL-17a","IL-17f","IL-22",
+        "IL-10",
+        "IL-8","CCL2","CCL3","CCL4","CCL5","CXCL9","CXCL10",
+        paste0("IL-1",greeks("alpha")),paste0("IL-1",greeks("beta")),"IL-1Ra","IL-3","IL-15","IL-18","G-CSF","GM-CSF","VEGF-A","sCD40L")
+
+```
+
+## Baseline heatmap components
+
+### Transpose and scaling cytokine baseline concentration for heatmap
+
+```{r}
+
+# Transpose tibble
+wide_baseline_cyt_heat <- clinical_cytokine_baseline_age.status %>%
+  mutate(`ae type` = tolower(`ae type`)) %>%
+  mutate(cyt_group = case_when(
+    cytokines %in% th1 ~ "Th1",
+    cytokines %in% th2 ~ "Th2",
+    cytokines %in% th17 ~ "Th17",
+    cytokines %in% treg ~ "Treg",
+    cytokines %in% chemokines ~ "Chemokines",
+    cytokines %in% other ~ "Other",
+    TRUE ~ NA_character_)
+    ) %>%
+  arrange(age65_status) %>%
+  select(`pub_id paper`,`cytokines`, `average_baseline_conc`, cyt_group) %>%
+  pivot_wider(names_from = `pub_id paper`, values_from = `average_baseline_conc`) %>%
+  arrange(match(cytokines, cyt_order))
+
+#extract cytokine col names prior to making dataframe
+cyt_names <- as.matrix(wide_baseline_cyt_heat[,1])
+
+#make dataframe for pheatmap
+heat_df_wide_cyt_baseline <- as.matrix(
+  wide_baseline_cyt_heat[,3:ncol(wide_baseline_cyt_heat)])
+
+#use cytokine names as row names for the pheatmap dataframe
+row.names(heat_df_wide_cyt_baseline) <- cyt_names
+
+#two scaling options
+heat_df_log2_scale_cyt_baseline = log(heat_df_wide_cyt_baseline, 2)
+heat_df_log_scale_cyt_baseline = log(heat_df_wide_cyt_baseline,10)
+
+# scaling using scale function
+transpose_heat_df_wide_cyt_baseline <- t(heat_df_wide_cyt_baseline)
+
+scaled_transpose_heat_df_wide_cyt_baseline = scale(transpose_heat_df_wide_cyt_baseline)
+
+heat_df_num_scale_cyt_baseline <- t(scaled_transpose_heat_df_wide_cyt_baseline)
+
+```
+
+### Creation of baseline heatmap label from clinical tibbles
+
+```{r}
+
+pt_id_cyt_baseline <- clinical_cytokine_baseline_age.status %>%
+  distinct(`pt id`)
+
+#heatmap labels
+
+baseline_cyt_heat_label <- clinical_tb %>%
+  mutate_all(.funs = tolower) %>%
+  filter(`pt id` %in% pt_id_cyt_baseline$`pt id`) %>%
+  mutate(`type of regimen` = case_when(
+        str_detect(`regimen`, "ipilimumab") ~ "CTLA based",
+        TRUE ~ "PD1/PDL1")) %>%
+  mutate(cancer_group = case_when(`cancer group` == "gi" ~ "gastrointestinal",
+                                  `cancer group` == "gu" ~ "genitourinary",
+                                  `cancer group` == "skin" ~ "skin",
+                                  `cancer group` == "upper aerodigestive" ~ "upper aerodigestive",
+                                  TRUE ~ "other")) %>%
+  distinct() %>%
+  filter(!is.na(`autoimmune history`)) %>%
+  mutate(`clinical response` = case_when(str_detect(response, paste(c("^complete response$","^partial response$"), collapse = "|")) ~ "yes",
+                         is.na(response) ~ NA_character_,
+                         str_detect(response, paste(c("^unknown$","not assessable"), collapse = "|")) ~ NA_character_,
+                         TRUE ~ "no")) %>%
+  arrange(age65_status) %>%
+  select(`pub_id paper`, age65_status,
+         `type of regimen`,
+         `cancer_group`
+         ) 
+
+```
+
+### Creating clinical annotation object for baseline heatmap
+
+```{r}
+colors_npg <- pal_npg()(10)
+
+color_from_viridis <- viridis(12, option = "D", alpha = 1)
+
+greater_than_equal <- "\u2265"
+no_gr2_irAE <- paste0("No grade ",greater_than_equal,"2 irAE")
+
+cyt_baseline_ann <- data.frame(baseline_cyt_heat_label[,-1])
+colnames(cyt_baseline_ann) <- c('Age status',
+                   'Type of regimen',
+                   'Cancer group')
+
+cyt_baseline_annotate_cols <- list(`Cancer group`= 
+                        c(`gastrointestinal` = color_pal_blu.red.yellow[1],
+                          `genitourinary` = color_pal_blu.red.yellow[2],
+                          `skin` = color_pal_blu.red.yellow[3],
+                          `upper aerodigestive` = color_pal_blu.red.yellow[4],
+                          `other` = color_pal_blu.red.yellow[5]),
+                      `Age status` = c(`yes` = color_pal[2], `no` = color_pal[1]),
+                      `Type of regimen` = c(`CTLA based` = "#C96567", `PD1/PDL1` = "#314455")
+                      )
+
+cyt_baseline_colAnn <- HeatmapAnnotation(df= cyt_baseline_ann,
+                            which = 'col',
+                            col = cyt_baseline_annotate_cols,
+                            annotation_width = unit(c(1,4), 'cm'),
+                            gap = unit(1, 'mm'),
+                            annotation_legend_param = list(
+                              `Age status` = list(title_gp = gpar(fontface = "plain"), labels_gp = gpar(fontsize = 12),
+                                                 labels = c("Young","Aged")),
+                              `Cancer group` = list(title_gp = gpar(fontface = "plain"), labels_gp = gpar(fontsize = 12),
+                                                    labels = c("Gastrointestinal","Genitourinary","Other","Skin","Upper aerodigestive")),
+                              `Type of regimen` = list(title_gp = gpar(fontface = "plain"), labels_gp = gpar(fontsize = 12),
+                                                       labels = c("anti-CTLA-4 + anti-PD-1","anti-PD-1 or anti-PD-L1"))
+                                                           ))
+```
+
+### Set up for arranging the baseline heatmap annotations
+
+```{r}
+cyt_group_tb <- wide_baseline_cyt_heat %>%
+  select(cytokines, cyt_group)
+
+cyt_group_df <- as.matrix(wide_baseline_cyt_heat$cyt_group)
+
+row.names(cyt_group_df) <- cyt_names
+
+# row splitting for heatmap
+# divide by cytokine groups
+row_split <- factor(cyt_group_tb$cyt_group, levels = cyt_group_order)
+
+# column splitting for heatmpa
+# divide by age status
+col_split <- factor(baseline_cyt_heat_label$age65_status, levels = c("no","yes"))
+
+```
+
+## On treatment heatmap components
+
+### Transpose and scaling cytokine on treatment concentration for heatmap
+
+```{r}
+
+#Transpose on.treatment concentration tibble
+wide_timepoint1_conc_cyt_heat <- clinical_change_timepoint1_age.status %>%
+  mutate(`ae type` = tolower(`ae type`)) %>%
+  mutate(cyt_group = case_when(
+    cytokines %in% th1 ~ "Th1",
+    cytokines %in% th2 ~ "Th2",
+    cytokines %in% th17 ~ "Th17",
+    cytokines %in% treg ~ "Treg",
+    cytokines %in% chemokines ~ "Chemokines",
+    cytokines %in% other ~ "Other",
+    TRUE ~ NA_character_)
+    ) %>%
+  arrange(age65_status) %>%
+  select(`pub_id paper`, `cytokines`, `concentration`, cyt_group) %>%
+  pivot_wider(names_from = `pub_id paper`, values_from = `concentration`) %>%
+  arrange(match(cytokines, cyt_order))
+
+#extract cytokine col names prior to making dataframe
+cyt_names <- as.matrix(wide_timepoint1_conc_cyt_heat[,1])
+
+#make dataframe for pheatmap
+heat_df_wide_conc_cyt_timepoint1 <- as.matrix(
+  wide_timepoint1_conc_cyt_heat[,3:ncol(wide_timepoint1_conc_cyt_heat)])
+
+#use cytokine names as row names for the pheatmap dataframe
+row.names(heat_df_wide_conc_cyt_timepoint1) <- cyt_names
+
+#two scaling options
+heat_df_log2_conc_cyt_timepoint1 = log(heat_df_wide_conc_cyt_timepoint1, 2)
+heat_df_log_conc_cyt_timepoint1 = log(heat_df_wide_conc_cyt_timepoint1,10)
+
+# scaling using scale function
+transpose_heat_df_wide_conc_cyt_timepoint1 <- t(heat_df_wide_conc_cyt_timepoint1)
+
+scaled.conc_transpose_heat_df_wide_cyt_timepoint1 = scale(transpose_heat_df_wide_conc_cyt_timepoint1)
+
+heat_df_num_scaled.conc_cyt_timepoint1 <- t(scaled.conc_transpose_heat_df_wide_cyt_timepoint1)
+
+```
+
+### Transpose and scaling cytokine on treatment fold change for heatmap
+
+```{r}
+
+#Transpose on.treatment fold change tibble
+wide_timepoint1_fold_cyt_heat <- clinical_change_timepoint1_age.status %>%
+  mutate(`ae type` = tolower(`ae type`)) %>%
+  mutate(cyt_group = case_when(
+    cytokines %in% th1 ~ "Th1",
+    cytokines %in% th2 ~ "Th2",
+    cytokines %in% th17 ~ "Th17",
+    cytokines %in% treg ~ "Treg",
+    cytokines %in% chemokines ~ "Chemokines",
+    cytokines %in% other ~ "Other",
+    TRUE ~ NA_character_)
+    ) %>%
+  arrange(age65_status) %>%
+  select(`pub_id paper`, `cytokines`, `fold`, cyt_group) %>%
+  pivot_wider(names_from = `pub_id paper`, values_from = `fold`) %>%
+  arrange(match(cytokines, cyt_order))
+
+wide_timepoint1_log2.fold_cyt_heat <- clinical_change_timepoint1_age.status %>%
+  mutate(`ae type` = tolower(`ae type`)) %>%
+  mutate(cyt_group = case_when(
+    cytokines %in% th1 ~ "Th1",
+    cytokines %in% th2 ~ "Th2",
+    cytokines %in% th17 ~ "Th17",
+    cytokines %in% treg ~ "Treg",
+    cytokines %in% chemokines ~ "Chemokines",
+    cytokines %in% other ~ "Other",
+    TRUE ~ NA_character_)
+    ) %>%
+  arrange(age65_status) %>%
+  select(`pub_id paper`, `cytokines`, `fold_log2`, cyt_group) %>%
+  pivot_wider(names_from = `pub_id paper`, values_from = `fold_log2`) %>%
+  arrange(match(cytokines, cyt_order))
+
+#extract cytokine col names prior to making dataframe
+cyt_names <- as.matrix(wide_timepoint1_fold_cyt_heat[,1])
+
+#make dataframe for pheatmap
+heat_df_wide_fold_cyt_timepoint1 <- as.matrix(
+  wide_timepoint1_fold_cyt_heat[,3:ncol(wide_timepoint1_fold_cyt_heat)])
+
+#use cytokine names as row names for the pheatmap dataframe
+row.names(heat_df_wide_fold_cyt_timepoint1) <- cyt_names
+
+#two scaling options
+heat_df_log2.fold_cyt_timepoint1 = log(heat_df_wide_fold_cyt_timepoint1, 2)
+heat_df_log.fold_cyt_timepoint1 = log(heat_df_wide_fold_cyt_timepoint1,10)
+
+```
+
+### Creation of on treatment heatmap labels from clinical tibbles
+
+```{r}
+# Pt ID in on treatment cytokine tibble
+
+pt_id_cyt_timepoint1 <- clinical_change_timepoint1_age.status %>%
+  distinct(`pt id`)
+
+#heatmap labels
+
+#On treatment cytokine heatmap label
+timepoint1_cyt_heat_label <- clinical_tb %>%
+  mutate_all(.funs = tolower) %>%
+  filter(`pt id` %in% pt_id_cyt_timepoint1$`pt id`) %>%
+  mutate(`type of regimen` = case_when(
+        str_detect(`regimen`, "ipilimumab") ~ "CTLA based",
+        TRUE ~ "PD1/PDL1")) %>%
+  mutate(cancer_group = case_when(`cancer group` == "gi" ~ "gastrointestinal",
+                                  `cancer group` == "gu" ~ "genitourinary",
+                                  `cancer group` == "skin" ~ "skin",
+                                  `cancer group` == "upper aerodigestive" ~ "upper aerodigestive",
+                                  TRUE ~ "other")) %>%
+  distinct() %>%
+  filter(!is.na(`autoimmune history`)) %>%
+  mutate(`clinical response` = case_when(str_detect(response, paste(c("^complete response$","^partial response$"), collapse = "|")) ~ "yes",
+                         is.na(response) ~ NA_character_,
+                         str_detect(response, paste(c("^unknown$","not assessable"), collapse = "|")) ~ NA_character_,
+                         TRUE ~ "no")) %>%
+  arrange(age65_status) %>%
+  select(`pub_id paper`, age65_status,
+         `type of regimen`,
+         `cancer_group`
+         ) 
+
+```
+
+### Creating clinical annotation for on treatment heatmaps
+
+```{r}
+colors_npg <- pal_npg()(10)
+
+color_from_viridis <- viridis(12, option = "D", alpha = 1)
+
+cyt_timepoint1_ann <- data.frame(timepoint1_cyt_heat_label[,-1])
+colnames(cyt_timepoint1_ann) <- c('Age status',
+                   'Type of regimen',
+                   'Cancer group')
+
+cyt_timepoint1_annotate_cols <- list(`Cancer group`= 
+                        c(`gastrointestinal` = color_pal_blu.red.yellow[1],
+                          `genitourinary` = color_pal_blu.red.yellow[2],
+                          `skin` = color_pal_blu.red.yellow[3],
+                          `upper aerodigestive` = color_pal_blu.red.yellow[4],
+                          `other` = color_pal_blu.red.yellow[5]),
+                      `Age status` = c(`yes` = color_pal[2], `no` = color_pal[1]),
+                      `Type of regimen` = c(`CTLA based` = "#C96567", `PD1/PDL1` = "#314455")
+                      )
+
+cyt_timepoint1_colAnn <- HeatmapAnnotation(df= cyt_timepoint1_ann,
+                            which = 'col',
+                            col = cyt_timepoint1_annotate_cols,
+                            annotation_width = unit(c(1,4), 'cm'),
+                            gap = unit(1, 'mm'),
+                            annotation_legend_param = list(
+                              `Age status` = list(title_gp = gpar(fontface = "plain"), labels_gp = gpar(fontsize = 12),
+                                                 labels = c("Young","Aged") 
+                                                 ),
+                              `Cancer group` = list(title_gp = gpar(fontface = "plain"), labels_gp = gpar(fontsize = 12),
+                                                    labels = c("Gastrointestinal","Genitourinary","Other","Skin","Upper aerodigestive")
+                                                 ),
+                              `Type of regimen` = list(title_gp = gpar(fontface = "plain"), labels_gp = gpar(fontsize = 12),
+                                                       labels = c("anti-CTLA-4 + anti-PD-1","anti-PD-1 or anti-PD-L1")
+                                                 )))
+```
+
+### Set up for arranging the on treatment heatmaps
+
+```{r}
+cyt_group_tb_timepoint1 <- wide_timepoint1_conc_cyt_heat %>%
+  select(cytokines, cyt_group)
+
+cyt_group_df_timepoint1 <- as.matrix(wide_timepoint1_conc_cyt_heat$cyt_group)
+
+row.names(cyt_group_df_timepoint1) <- cyt_names
+
+row_split_timepoint1 <- factor(cyt_group_tb$cyt_group, levels = cyt_group_order)
+
+col_split_timepoint1 <- factor(timepoint1_cyt_heat_label$age65_status, levels = c("no","yes"))
+
+```
+
+# Plots
+
+### Baseline cytokine heatmap
+
+```{r,echo = FALSE, warning = FALSE, message = FALSE}
+
+col_fun_baseline = colorRamp2(c(-2,0,2,4,6), c("#2166AC","#F7F7F7","#FDDBC7", "#D6604D", "#B2182B"))
+
+baseline_cyt_scaled_data_heatmap <- Heatmap(heat_df_num_scale_cyt_baseline, 
+                                            col = col_fun_baseline, 
+                                            heatmap_legend_param = list(title = "Scaled \nconcentration"
+                                                                        ),
+                                            show_column_names = FALSE,
+                                            column_title = " ",
+                                            column_title_side = "bottom",
+                                            row_title_rot = 0,
+                                            row_title_gp = gpar(fontsize = 14), 
+                                            row_split = row_split,
+                                            column_split = col_split,
+                                            row_names_side = "left",
+                                            show_row_names = FALSE,
+                                            cluster_rows = FALSE, 
+                                            cluster_columns = FALSE,
+                                            top_annotation=cyt_baseline_colAnn ,
+                                            border_gp = gpar(col = "black", lty = 1),
+                                            rect_gp = gpar(col = NA, lwd = 2),
+                                            )
+
+baseline_cyt_label_heatmap <- Heatmap(cyt_group_df, 
+                                      col = colors_cyt_label_heatmap,
+                                      show_column_names= FALSE, 
+                                      show_row_names = TRUE,
+                                      row_split = row_split,
+                                      show_heatmap_legend = FALSE,
+                                      heatmap_legend_param = list(title = "Cytokine Group"),
+                                      row_title_gp = gpar(fontsize = 12))
+
+baseline_cyt_label_heatmap_greek <- Heatmap(cyt_group_df, 
+              col = colors_cyt_label_heatmap,
+              show_column_names= FALSE, 
+              show_row_names = FALSE,
+              row_split = row_split,
+              show_heatmap_legend = FALSE,
+              heatmap_legend_param = list(title = "Cytokine Group"),
+              row_title_gp = gpar(fontsize = 12)) +
+  rowAnnotation(labels = anno_text(cyt_names_greek))
+
+baseline_cyt_label_heatmap_capital <- Heatmap(cyt_group_df, 
+              col = colors_cyt_label_heatmap,
+              show_column_names= FALSE, 
+              show_row_names = FALSE,
+              row_split = row_split,
+              show_heatmap_legend = FALSE,
+              heatmap_legend_param = list(title = "Cytokine Group"),
+              row_title_gp = gpar(fontsize = 12)) +
+  rowAnnotation(labels = anno_text(cyt_names_capital))
+
+baseline_cyt_label_heatmap_greek_formal <- Heatmap(cyt_group_df, 
+              col = colors_cyt_label_heatmap,
+              show_column_names= FALSE, 
+              show_row_names = FALSE,
+              row_split = row_split,
+              show_heatmap_legend = FALSE,
+              heatmap_legend_param = list(title = "Cytokine Group"),
+              row_title_gp = gpar(fontsize = 12)) +
+  rowAnnotation(labels = anno_text(cyt_names_greek_formal))
+
+baseline_scaled_total_heatmap <- baseline_cyt_label_heatmap + baseline_cyt_scaled_data_heatmap
+
+baseline_scaled_total_heatmap_greek <- baseline_cyt_label_heatmap_greek + baseline_cyt_scaled_data_heatmap
+
+baseline_scaled_total_heatmap_capital <- baseline_cyt_label_heatmap_capital + baseline_cyt_scaled_data_heatmap
+
+baseline_scaled_total_heatmap_greek_formal <- baseline_cyt_label_heatmap_greek_formal + baseline_cyt_scaled_data_heatmap
+
+draw(baseline_scaled_total_heatmap_greek_formal, auto_adjust = FALSE)
+```
+
+### On treatment heatmap (scaled concentration or zscore)
+
+```{r,echo = FALSE, warning = FALSE, message = FALSE}
+col_fun_timepoint1 = colorRamp2(c(-2,0,2,4,6), c("#2166AC","#F7F7F7","#FDDBC7", "#D6604D", "#B2182B"))
+
+timepoint1_cyt_scaled.conc_data_heatmap <- Heatmap(heat_df_num_scaled.conc_cyt_timepoint1, 
+        col = col_fun_timepoint1,
+        heatmap_legend_param = list(title = "Scaled \nconcentration"),
+        show_column_names = FALSE,
+        column_title = " ",
+        column_title_side = "bottom",
+        row_title_rot = 0,
+        row_title_gp = gpar(fontsize = 14), 
+        row_split = row_split_timepoint1,
+        column_split = col_split_timepoint1,
+        row_names_side = "left",
+        show_row_names = FALSE,
+        cluster_rows = FALSE, 
+        cluster_columns = FALSE,
+        top_annotation=cyt_timepoint1_colAnn ,
+        border_gp = gpar(col = "black", lty = 1),
+        rect_gp = gpar(col = NA, lwd = 2),
+        )
+
+timepoint1_cyt_label_heatmap <- Heatmap(cyt_group_df, 
+              col = colors_cyt_label_heatmap,
+              show_column_names= FALSE, 
+              show_row_names = TRUE,
+              row_split = row_split_timepoint1,
+              show_heatmap_legend = FALSE,
+              heatmap_legend_param = list(title = "Cytokine Group"),
+              row_title_gp = gpar(fontsize = 12))
+
+timepoint1_cyt_label_heatmap_greek <- Heatmap(cyt_group_df, 
+              col = colors_cyt_label_heatmap,
+              show_column_names= FALSE, 
+              show_row_names = FALSE,
+              row_split = row_split_timepoint1,
+              show_heatmap_legend = FALSE,
+              heatmap_legend_param = list(title = "Cytokine Group"),
+              row_title_gp = gpar(fontsize = 12)) +
+  rowAnnotation(labels = anno_text(cyt_names_greek))
+
+timepoint1_cyt_label_heatmap_capital <- Heatmap(cyt_group_df, 
+              col = colors_cyt_label_heatmap,
+              show_column_names= FALSE, 
+              show_row_names = FALSE,
+              row_split = row_split,
+              show_heatmap_legend = FALSE,
+              heatmap_legend_param = list(title = "Cytokine Group"),
+              row_title_gp = gpar(fontsize = 12)) +
+  rowAnnotation(labels = anno_text(cyt_names_capital))
+
+timepoint1_cyt_label_heatmap_greek_formal <- Heatmap(cyt_group_df, 
+              col = colors_cyt_label_heatmap,
+              show_column_names= FALSE, 
+              show_row_names = FALSE,
+              row_split = row_split_timepoint1,
+              show_heatmap_legend = FALSE,
+              heatmap_legend_param = list(title = "Cytokine Group"),
+              row_title_gp = gpar(fontsize = 12)) +
+  rowAnnotation(labels = anno_text(cyt_names_greek_formal))
+
+timepoint1_scaled.conc_total_heatmap <- timepoint1_cyt_label_heatmap + timepoint1_cyt_scaled.conc_data_heatmap
+
+timepoint1_scaled.conc_total_heatmap_greek <- timepoint1_cyt_label_heatmap_greek + timepoint1_cyt_scaled.conc_data_heatmap
+
+timepoint1_scaled.conc_total_heatmap_capital <- timepoint1_cyt_label_heatmap_capital + timepoint1_cyt_scaled.conc_data_heatmap
+
+timepoint1_scaled.conc_total_heatmap_greek_formal <- timepoint1_cyt_label_heatmap_greek_formal + timepoint1_cyt_scaled.conc_data_heatmap
+
+draw(timepoint1_scaled.conc_total_heatmap_greek_formal,auto_adjust = FALSE)
+```
+
+### On treatment cytokine heatmap (log 2 fold change)
+
+```{r,echo = FALSE, warning = FALSE, message = FALSE}
+
+timepoint1_cyt_fold.log2_data_heatmap <- Heatmap(heat_df_log2.fold_cyt_timepoint1, 
+        col = colorRampPalette(c("navy","white","firebrick3"))(50), 
+        heatmap_legend_param = list(title = expression(Log[2] ~ "fold")
+                                    ),
+        show_column_names = FALSE,
+        column_title = " ",
+        column_title_side = "bottom",
+        row_title_rot = 0,
+        row_title_gp = gpar(fontsize = 14), 
+        row_split = row_split_timepoint1,
+        column_split = col_split_timepoint1,
+        row_names_side = "left",
+        show_row_names = FALSE,
+        cluster_rows = FALSE, 
+        cluster_columns = FALSE,
+        top_annotation=cyt_timepoint1_colAnn ,
+        border_gp = gpar(col = "black", lty = 1),
+        rect_gp = gpar(col = NA, lwd = 2),
+        )
+
+timepoint1_fold.log2_total_heatmap <- timepoint1_cyt_label_heatmap + timepoint1_cyt_fold.log2_data_heatmap
+
+#draw(timepoint1_fold.log2_total_heatmap,auto_adjust = FALSE)
+
+timepoint1_fold.log2_total_heatmap_greek <- timepoint1_cyt_label_heatmap_greek + timepoint1_cyt_fold.log2_data_heatmap
+
+#draw(timepoint1_fold.log2_total_heatmap_greek,auto_adjust = FALSE)
+
+timepoint1_fold.log2_total_heatmap_capital <- timepoint1_cyt_label_heatmap_capital + timepoint1_cyt_fold.log2_data_heatmap
+
+#draw(timepoint1_fold.log2_total_heatmap_capital,auto_adjust = FALSE)
+
+timepoint1_fold.log2_total_heatmap_greek_formal <- timepoint1_cyt_label_heatmap_greek_formal + timepoint1_cyt_fold.log2_data_heatmap
+
+draw(timepoint1_fold.log2_total_heatmap_greek_formal,auto_adjust = FALSE)
+```
+
+# Plot saving
+
+## Baseline scaled concentration (Ext Figure 2A)
+
+### Cairo pdf save
+
+```{r}
+# Open cairo_pdf device
+cairo_pdf(file = paste0(output.path.pdf, "/", Sys.Date(), "_", "baseline_scaled.conc_cyt_aging_heatmap_greek_formal.pdf"),
+     height = 8, width = 12)
+
+# print heatmap to device
+draw(baseline_scaled_total_heatmap_greek_formal,auto_adjust = FALSE)
+
+# Close device
+dev.off()
+
+```
+
+### TIFF save
+
+```{r}
+# Open TIFF device
+tiff(filename = paste0(output.path.tiff, "/", Sys.Date(), "_", "baseline_scaled.conc_cyt_aging_heatmap_greek_formal.tiff"),
+     height = 8, width = 12, units = "in", res = 600)
+
+# Print the plot to the TIFF device
+draw(baseline_scaled_total_heatmap_greek_formal,auto_adjust = FALSE)
+
+# Close the TIFF device
+dev.off()
+
+```
+
+## On treatment scaled concentration (Ext Figure 2B)
+
+### Cairo pdf save
+
+```{r}
+# Open cairo_pdf device
+cairo_pdf(file = paste0(output.path.pdf, "/", Sys.Date(), "_", "timepoint1_scaled.conc_cyt_aging_heatmap_greek_formal.pdf"),
+     height = 8, width = 12)
+
+# print heatmap to device
+draw(timepoint1_scaled.conc_total_heatmap_greek_formal, #annotation_legend_side = "bottom", 
+     auto_adjust = FALSE)
+
+# Close device
+dev.off()
+
+```
+
+### TIFF save
+
+```{r}
+# Open TIFF device
+tiff(filename = paste0(output.path.tiff, "/", Sys.Date(), "_", "timepoint1_scaled.conc_cyt_aging_heatmap_greek_formal.tiff"),
+     height = 8, width = 12, units = "in", res = 600)
+
+# Print the plot to the TIFF device
+draw(timepoint1_scaled.conc_total_heatmap_greek_formal, #annotation_legend_side = "bottom", 
+     auto_adjust = FALSE)
+
+# Close the TIFF device
+dev.off()
+
+```
+
+## On treatment log2 fold (Figure 2B)
+
+### Cairo pdf save
+
+```{r}
+# Open cairo_pdf device
+cairo_pdf(file = paste0(output.path.pdf, "/", Sys.Date(), "_", "timepoint1_log2fold_cyt_aging_heatmap_greek_formal.pdf"),
+     height = 8, width = 12)
+
+# print heatmap to device
+draw(timepoint1_fold.log2_total_heatmap_greek_formal,auto_adjust = FALSE)
+
+# Close device
+dev.off()
+
+```
+
+### TIFF save
+
+```{r}
+# Open TIFF device
+tiff(filename = paste0(output.path.tiff, "/", Sys.Date(), "_", "timepoint1_log2fold_cyt_aging_heatmap_greek.tiff"),
+     height = 8, width = 18, units = "in", res = 600)
+
+# Print the plot to the TIFF device
+draw(timepoint1_fold.log2_total_heatmap_greek_formal,auto_adjust = FALSE)
+
+# Close the TIFF device
+dev.off()
+
+```
+
+### Supporting data
+
+#### Supporting data generation
+
+```{r}
+# baseline
+transpose_heat_df_num_scale_cyt_baseline <- heat_df_num_scale_cyt_baseline %>%
+  t(.)
+
+colnames(transpose_heat_df_num_scale_cyt_baseline) <- cyt_names_greek_formal
+
+transpose_baseline_num_scale_pt_order <- rownames(transpose_heat_df_num_scale_cyt_baseline)
+
+baseline_cyt_scaled.conc_supporting.data <-transpose_heat_df_num_scale_cyt_baseline %>%
+  cbind(transpose_baseline_num_scale_pt_order,.) %>%
+  as_tibble() %>%
+  rename(`pub_id paper` = "transpose_baseline_num_scale_pt_order") %>%
+  mutate(`pub_id paper` = tolower(`pub_id paper`)) %>%
+  left_join(baseline_cyt_heat_label, by = "pub_id paper") %>%
+  mutate(`pub_id paper` = toupper(`pub_id paper`)) %>%
+  mutate(cancer_group = str_to_title(cancer_group),
+         age65_status = str_to_title(age65_status)) %>%
+  relocate(age65_status:cancer_group,.after = `pub_id paper`) %>%
+  rename(`Cancer group` = "cancer_group",
+         `Aged status` = "age65_status",
+         `Type of regimen` = "type of regimen",
+         `Subject ID` = "pub_id paper")
+
+# on treatment scaled concentration
+
+on.treatment_num_scale_pt_order <- rownames(scaled.conc_transpose_heat_df_wide_cyt_timepoint1)
+
+on.treatment_cyt_scaled.conc_supporting.data <-scaled.conc_transpose_heat_df_wide_cyt_timepoint1 %>%
+  cbind(on.treatment_num_scale_pt_order,.) %>%
+  as_tibble() %>%
+  rename(`pub_id paper` = "on.treatment_num_scale_pt_order") %>%
+  mutate(`pub_id paper` = tolower(`pub_id paper`)) %>%
+  left_join(timepoint1_cyt_heat_label, by = "pub_id paper") %>%
+  mutate(`pub_id paper` = toupper(`pub_id paper`)) %>%
+  mutate(cancer_group = str_to_title(cancer_group),
+         age65_status = str_to_title(age65_status)) %>%
+  relocate(age65_status:cancer_group,.after = `pub_id paper`) %>%
+  rename(`Cancer group` = "cancer_group",
+         `Aged status` = "age65_status",
+         `Type of regimen` = "type of regimen",
+         `Subject ID` = "pub_id paper")
+
+# On treatment log2 fold
+
+transpose_heat_df_log2.fold_cyt_timepoint1 <- heat_df_log2.fold_cyt_timepoint1 %>%
+  t(.)
+
+colnames(transpose_heat_df_log2.fold_cyt_timepoint1) <- cyt_names_greek_formal
+
+transpose_timepoint1_log2.fold_pt_order <- rownames(transpose_heat_df_log2.fold_cyt_timepoint1)
+
+on.treatment_cyt_log2fold_supporting.data <- transpose_heat_df_log2.fold_cyt_timepoint1 %>%
+  cbind(transpose_timepoint1_log2.fold_pt_order,.) %>%
+  as_tibble() %>%
+  rename(`pub_id paper` = "transpose_timepoint1_log2.fold_pt_order") %>%
+  mutate(`pub_id paper` = tolower(`pub_id paper`)) %>%
+  left_join(timepoint1_cyt_heat_label, by = "pub_id paper") %>%
+  mutate(`pub_id paper` = toupper(`pub_id paper`)) %>%
+  mutate(cancer_group = str_to_title(cancer_group),
+         age65_status = str_to_title(age65_status)) %>%
+  relocate(age65_status:cancer_group,.after = `pub_id paper`) %>%
+  rename(`Cancer group` = "cancer_group",
+         `Aged status` = "age65_status",
+         `Type of regimen` = "type of regimen",
+         `Subject ID` = "pub_id paper")
+```
+
+### Exporting 
+
+```{r}
+
+write.xlsx(baseline_cyt_scaled.conc_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "baseline_scaled.conc_aging_heatmap_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+write.xlsx(on.treatment_cyt_scaled.conc_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "on.treatment_scaled.conc_aging_heatmap_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+write.xlsx(on.treatment_cyt_log2fold_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "timepoint1_log2fold_cyt_aging_heatmap_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+```

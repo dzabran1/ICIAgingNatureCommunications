@@ -1,0 +1,355 @@
+---
+title: "Baseline biomarker barplots (TMB, PD-L1, MSI/dMMR"
+output: html_document
+date: "2024-05-23"
+---
+
+# Set up
+
+### Libraries
+
+```{r}
+library(here)
+library(tidyverse)
+library(grid)
+library(ggbreak) 
+library(ggplot2)
+library(ggpubr)
+library(svglite)
+library(rstatix)
+library(Cairo)
+library(openxlsx)
+library(readxl)
+```
+
+### Directory pathing
+
+```{r}
+here::i_am("code/02.4_aging_baseline.tmb.pdl1.msi.dmmr_analysis.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+
+```
+
+### Source functions
+
+```{r}
+source(here("code/functions/function_boxplot.R"))
+
+```
+
+### Import data
+
+```{r}
+
+clinical <- readRDS(here("output/RDS files/clinical.rds"))
+
+file_path <- here("data/clinical/Aging_deid_TMB.PDL1.MSIH.dMMR_3.7.24_data.extracted.xlsx")
+
+biomarker_data <- read_excel(file_path) %>%
+  select(!pub_id:`pub_id paper`) %>%
+  rename(TMB = "TMB (mut/Mb)",
+         PDL1_score_type = "PDL1 score type (i.e. TPS, CPS, etc)",
+         `MSI-H.dMMR_status` = "MSI-H/dMMR (yes or no)")
+```
+
+### Combine data
+
+```{r}
+
+clinical_biomarker_tb <- clinical %>%
+  left_join(biomarker_data, by = "pt id") %>%
+  select(`pt id`, `pub_id paper`, `age on study`, age65_status, TMB:`MSI-H.dMMR_status`)
+
+```
+
+### Data processing
+
+```{r}
+TMB_data <- clinical_biomarker_tb %>%
+  filter(!is.na(TMB))
+
+PDL1_data <- clinical_biomarker_tb %>%
+  filter(!is.na(`PDL1 expression classification`))
+
+MSI.dMMR_data <- clinical_biomarker_tb %>%
+  filter(!is.na(`MSI-H.dMMR_status`))
+
+MSI.dMMR_data$`MSI-H.dMMR_status` <- factor(MSI.dMMR_data$`MSI-H.dMMR_status`, levels = c("Yes","No"))
+```
+
+
+colors <- c(pal_npg()(10))
+color_from_viridis <- viridis(1, option = "D", alpha = 1)
+color_pal_v1 <- c("#284B96",
+                 "#4AB8A7",
+                 "#F49835",
+                 "#878787",
+                 "#544667",
+                 "#C37672")
+
+color_pal_v2 <- c(colors[2], color_from_viridis)
+
+### Color palettes
+
+```{r}
+
+color_pal_nejm <- c("#0072B5FF","#BC3C29FF")
+
+three_colors_bar <- c("#d1495b","#edae49","#00798c")
+
+two_colors_bar <- c("#d1495b","#00798c")
+```
+
+### Special characters for graphs
+
+```{r}
+# For >= symbol in strings
+greater_than_equal <- "\u2265"
+less_than <- "\u003c"
+
+age_greater.equal_65 <- paste0("Age ",greater_than_equal,"65")
+
+age_less_65 <- paste0("Age ",less_than,"65")
+
+age_greater.equal_75 <- paste0("Age ",greater_than_equal,"75")
+
+age_less_75 <- paste0("Age ",less_than,"75")
+
+```
+
+# Statistics
+
+# TMB t.test table
+
+```{r}
+# Wilcoxon table cytokines age 65 status (cytokines)
+
+TMB_data %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+tmb_age65status_t.test_table <- TMB_data  %>%
+  summarise(category = "TMB",
+            mean_age65.older = mean(TMB[age65_status == "yes"]),
+            mean_age65.younger = mean(TMB[age65_status == "no"]),
+            std_age65.older = sd(TMB[age65_status == "yes"]),
+            std_age65.younger = sd(TMB[age65_status == "no"]),
+            pval = t.test(TMB ~ age65_status, paired = FALSE)$p.value) 
+
+```
+
+### PDL1 count information
+
+```{r}
+
+PDL1_data %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+```
+
+### PDL1 Fisher
+
+```{r}
+# Fisher
+fisher.PDL1.age.tb <- PDL1_data %>%
+  select(age65_status, `PDL1 expression classification`) %>%
+  group_by(age65_status, `PDL1 expression classification`) %>%
+  summarise(count = n())
+
+fisher.PDL1.age.manual.df <- data.frame("no" = fisher.PDL1.age.tb$count[1:3], 
+                                                 "yes" = fisher.PDL1.age.tb$count[4:6], 
+                                                 row.names = c("high","low","none")
+                                        )
+
+fisher.test(fisher.PDL1.age.manual.df)
+```
+
+### MSI/dMMR count information
+
+```{r}
+
+MSI.dMMR_data %>%
+  group_by(age65_status) %>%
+  summarise(count = n())
+
+```
+
+### MSI/dMMR Fisher
+
+```{r}
+# Fisher
+fisher.MSI.dMMR.age.tb <- MSI.dMMR_data %>%
+  select(age65_status, `MSI-H.dMMR_status`) %>%
+  group_by(age65_status, `MSI-H.dMMR_status`) %>%
+  summarise(count = n())
+
+fisher.MSI.dMMR.age.manual.df <- data.frame("no" = fisher.MSI.dMMR.age.tb$count[1:2], 
+                                                 "yes" = fisher.MSI.dMMR.age.tb$count[3:4], 
+                                                 row.names = c("high","none")
+                                        )
+
+fisher.test(fisher.MSI.dMMR.age.manual.df)
+```
+
+# Plots
+
+### TMB boxplot
+
+```{r}
+
+TMB_plot <- TMB_data %>%
+  ggplot(aes(x= age65_status, y= as.numeric(TMB), color = age65_status)) + 
+    scale_color_manual(values = color_pal_nejm) + 
+      geom_boxplot(size = 0.75, 
+                 fill = 'white'
+    ) +
+    geom_jitter(alpha = 0.75, pch=19, size=1.5, position=position_jitterdodge(dodge.width=1, jitter.width=0.5)) +
+  scale_y_continuous(limits = c(0, 25), breaks = seq(0,22, by = 5)) +
+  #scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  scale_x_discrete(labels = c("Young", "Aged")) +
+  labs(title = "TMB", 
+       y = "TMB (mut/Mb)") +
+  #stat_compare_means(method = "t.test") +
+  stat_compare_means(comparisons = list(c("no","yes")), aes(label = after_stat(p.signif)), bracket.size = 0.5, label.y = 21, size = 5, method = "t.test") +
+  theme(axis.text.y = element_text(color="black", size=12, angle = 90, hjust = 0.5), 
+        axis.text.x = element_text(color="black",size=12, angle = 0), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_blank(), 
+        axis.title.y = element_text(size = 14),
+        plot.title = element_text(hjust = 0.5, size = 14),
+        strip.text = element_blank(), strip.background = element_blank(),
+        axis.text.y.left = element_text(angle = 0), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank(),
+        legend.position = 'none')
+  
+print(TMB_plot)
+
+```
+
+### PDL1 Stacked Barplot
+
+```{r}
+
+PDL1.age_graph <- PDL1_data %>%
+  count(`PDL1 expression classification`, age65_status) %>%
+  group_by(age65_status) %>%
+  mutate(pct= prop.table(n)*100) %>%
+  ggplot() +
+  aes(age65_status, pct, fill = `PDL1 expression classification`) +
+  scale_fill_manual(name = "PD-L1 classification", values=three_colors_bar, labels = c("High","Low","None")) +
+  geom_bar(stat="identity") +
+  ylab("Patients (%)") +
+  geom_text(aes(label=paste0(n, "(",sprintf("%1.1f", pct),"%)")),size = 6, color = "white",
+            position=position_stack(vjust=0.5)) +
+  theme_classic() +
+  labs(#title = "Response by age status", 
+       x = #"Age status",
+       "") +
+  scale_x_discrete(labels = c("Young", "Aged")) +
+  #scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  theme(plot.title = element_text(hjust = 0.75, size = 20), 
+        axis.text.y.left = element_text(angle = 0), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank(),
+        axis.text.y = element_text(color="black", size=20, angle = 90, hjust = 0.5),
+        axis.text.x = element_text(color="black",size=20, angle = 0), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 18) 
+        ) 
+
+print(PDL1.age_graph)
+
+```
+
+
+### MSI-H dMMR Stacked Barplot
+
+```{r}
+
+MSI.dMMR.age_graph <- MSI.dMMR_data %>%
+  count(`MSI-H.dMMR_status`, age65_status) %>%
+  group_by(age65_status) %>%
+  mutate(pct= prop.table(n)*100) %>%
+  ggplot() +
+  aes(age65_status, pct, fill = `MSI-H.dMMR_status`) +
+  scale_fill_manual(name = "MSI-H/dMMR\nstatus", values=two_colors_bar, labels = c("Yes","No")) +
+  geom_bar(stat="identity") +
+  ylab("Patients (%)") +
+  geom_text(aes(label=paste0(n, "(",sprintf("%1.1f", pct),"%)")),size = 6, color = "white",
+            position=position_stack(vjust=0.5)) +
+  theme_classic() +
+  labs(#title = "Response by age status", 
+       x = #"Age status",
+       "") +
+  #scale_x_discrete(labels = c(age_less_65, age_greater.equal_65
+  scale_x_discrete(labels = c("Young", "Aged")) +
+  theme(plot.title = element_text(hjust = 0.75, size = 20), 
+        axis.text.y.left = element_text(angle = 0), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank(),
+        axis.text.y = element_text(color="black", size=20, angle = 90, hjust = 0.5),
+        axis.text.x = element_text(color="black",size=20, angle = 0), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 18) 
+        ) 
+
+print(MSI.dMMR.age_graph)
+
+```
+
+### Plot saving
+
+```{r}
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Stacked_Barplot_MSI.dMMR_age.65.status.pdf"), 
+       plot = MSI.dMMR.age_graph, 
+       height = 7, width = 7,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Stacked_Barplot_PDL1_age.65.status.pdf"), 
+       plot = PDL1.age_graph, 
+       height = 7, width = 7,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Boxplot_TMB_age.65.status.pdf"), 
+       plot = TMB_plot, 
+       height = 3, width = 3,
+       device = cairo_pdf,
+       dpi = 600)
+
+```
+
+### Generation of supporting data file
+
+```{r}
+biomarker_supporting.data <- clinical_biomarker_tb %>%
+  select(`pub_id paper`,age65_status,TMB,`PDL1 expression classification`,`MSI-H.dMMR_status`)
+
+write.xlsx(biomarker_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "Aging_TMB.PDL1.MSI.dMMR_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+```
+

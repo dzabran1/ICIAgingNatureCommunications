@@ -1,0 +1,864 @@
+---
+title: "Demographic tables"
+output: html_document
+date: "2024-05-23"
+---
+
+# Set up
+
+### Libraries
+
+```{r}
+library(here)
+library(tidyverse)
+library(readxl)
+```
+
+### Directory pathing
+
+```{r}
+here::i_am("code/02.1_aging.total_cohort.table.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+```
+
+### Import data
+
+```{r}
+
+master.file <- readRDS(here("output/RDS files/clinical.rds"))
+
+total_cytof_change <- readRDS(here("output/RDS files/total_cytof_change.rds"))
+
+age65.older <- master.file %>%
+  filter(`age on study` >= 65)
+
+age65.younger <- master.file %>%
+  filter(`age on study` < 65)
+
+total_cytof_change_review <- total_cytof_change %>%
+  distinct(`pt id`,`blood timepoint`, .keep_all = TRUE)
+
+cytof_pt_list <- unique(total_cytof_change_review$`pt id`)
+
+cytof_cohort <- master.file %>%
+  filter(`pt id` %in% cytof_pt_list)
+
+cytof_age65.older <- cytof_cohort %>%
+  filter(`age on study` >= 65)
+
+cytof_age65.younger <- cytof_cohort %>%
+  filter(`age on study` < 65)
+
+```
+
+# Table information generation
+
+### Cohort demographics
+
+```{r}
+
+# median age
+master.file %>%
+  summarise(median = median(`age on study`),
+            min = min(`age on study`),
+            max = max(`age on study`))
+
+# age 65 status
+
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`age65_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# gender distribution
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`gender`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# autoimmune history
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`autoimmune history`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer type distribution
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer type`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# regimen
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(regimen) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# stage distribution
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`stage_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# race distribution
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(race_w_b_o) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# grade 
+
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`ae grade`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# irae distribution
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(irae) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# severe irae distribution
+master.file %>%
+  ungroup() %>%
+  group_by(`severe irae`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior systemic therapy distribution
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior io therapy distribution
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior io treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# Response for only advanced/met disease
+
+master.file %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(orr_character) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+master.file %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(response) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+```
+
+### Age 65 older demographics
+
+```{r}
+
+# median age
+age65.older %>%
+  summarise(median = median(`age on study`),
+            min = min(`age on study`),
+            max = max(`age on study`))
+
+# gender distribution
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`gender`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# autoimmune history
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`autoimmune history`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer group
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer_group`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer type distribution
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer type`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# regimen
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(regimen) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# stage distribution
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`stage_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# race distribution
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(race_w_b_o) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# grade 
+
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`ae grade`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# irae distribution
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(irae) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# severe irae distribution
+age65.older %>%
+  ungroup() %>%
+  group_by(`severe irae`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior systemic therapy distribution
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior io therapy distribution
+age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior io treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# Response for only advanced/met disease
+age65.older %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(orr_character) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+age65.older %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(response) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+```
+
+### Age 65 younger demographics
+
+```{r}
+
+# median age
+age65.younger %>%
+  summarise(median = median(`age on study`),
+            min = min(`age on study`),
+            max = max(`age on study`))
+
+# gender distribution
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`gender`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# autoimmune history
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`autoimmune history`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer group
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer_group`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer type distribution
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer type`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# regimen
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(regimen) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# stage distribution
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`stage_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# race distribution
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(race_w_b_o) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# grade 
+
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`ae grade`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# irae distribution
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(irae) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# severe irae distribution
+age65.younger %>%
+  ungroup() %>%
+  group_by(`severe irae`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior systemic therapy distribution
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior io therapy distribution
+age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior io treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# Response for only advanced/met disease
+age65.younger %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(orr_character) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+age65.younger %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(response) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+```
+
+### CyTOF cohort demographics
+
+```{r}
+
+# median age
+cytof_cohort %>%
+  summarise(median = median(`age on study`),
+            min = min(`age on study`),
+            max = max(`age on study`))
+
+# age 65 status
+
+master.file %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`age65_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# gender distribution
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`gender`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# autoimmune history
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`autoimmune history`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer type distribution
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer type`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# regimen
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(regimen) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# stage distribution
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`stage_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# race distribution
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(race_w_b_o) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# grade 
+
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`ae grade`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# irae distribution
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(irae) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# severe irae distribution
+cytof_cohort %>%
+  ungroup() %>%
+  group_by(`severe irae`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior systemic therapy distribution
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior io therapy distribution
+cytof_cohort %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior io treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# Response for only advanced/met disease
+cytof_cohort %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(orr_character) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+cytof_cohort %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(response) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+```
+
+### CyTOF age 65 older cohort demographics
+
+```{r}
+
+# median age
+cytof_age65.older  %>%
+  summarise(median = median(`age on study`),
+            min = min(`age on study`),
+            max = max(`age on study`))
+
+# gender distribution
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`gender`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# autoimmune history
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`autoimmune history`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer type distribution
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer type`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# regimen
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(regimen) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# stage distribution
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`stage_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# race distribution
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(race_w_b_o) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# grade 
+
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`ae grade`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# irae distribution
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(irae) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# severe irae distribution
+cytof_age65.older  %>%
+  ungroup() %>%
+  group_by(`severe irae`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior systemic therapy distribution
+cytof_age65.older  %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior io therapy distribution
+cytof_age65.older %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior io treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# Response for only advanced/met disease
+cytof_age65.older %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(orr_character) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+cytof_age65.older  %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(response) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+```
+
+### CyTOF age 65 younger cohort demographics
+
+```{r}
+
+# median age
+cytof_age65.younger %>%
+  summarise(median = median(`age on study`),
+            min = min(`age on study`),
+            max = max(`age on study`))
+
+# gender distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`gender`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# autoimmune history
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`autoimmune history`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# cancer type distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`cancer type`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# regimen
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(regimen) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# stage distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`stage_status`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# race distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(race_w_b_o) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# grade 
+
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`ae grade`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# irae distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(irae) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# severe irae distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  group_by(`severe irae`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior systemic therapy distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# prior io therapy distribution
+cytof_age65.younger %>%
+  ungroup() %>%
+  distinct(`pt id`,.keep_all = TRUE) %>%
+  group_by(`prior io treatment`) %>%
+  summarise(count = n(), 
+            percent = round(count/nrow(.)*100,digits =1))
+
+# Response for only advanced/met disease
+cytof_age65.younger %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(orr_character) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+cytof_age65.younger %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  group_by(response) %>%
+  summarise(count =n(),
+            percent = round(count/nrow(.)*100,digits =1))
+
+```
+
+# Statistics
+
+### Significance testing for demographic table
+
+```{r}
+
+# sex
+master.file %>%
+  select(gender, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# race
+master.file %>%
+  select(race_w_b_o, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# autoimmune
+master.file %>%
+  select(`autoimmune history`, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# cancer group
+master.file %>%
+  select(cancer_group, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# disease stage
+master.file %>%
+  select(stage_status, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+  
+# regimen
+master.file %>%
+  select(regimen_type, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# prior systemic
+master.file %>%
+  select(`prior treatment`, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# prior io
+master.file %>%
+  select(`prior io treatment`, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# irae
+master.file %>%
+  select(`irae`, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+# response
+master.file %>%
+  filter(!is.na(orr_character)) %>%
+  select(orr_character, age65_status) %>%
+  table() %>%
+  fisher.test(alternative = "two.sided")
+
+```

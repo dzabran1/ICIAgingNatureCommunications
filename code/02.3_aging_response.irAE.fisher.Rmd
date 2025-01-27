@@ -1,0 +1,230 @@
+---
+title: "Response and irAE Barplots"
+output: html_document
+date: "2024-05-23"
+---
+# Set up
+
+### Libraries
+
+```{r}
+library(here)
+library(tidyverse)
+library(grid)
+library(ggbreak) 
+library(ggplot2)
+library(viridis)
+library(Cairo)
+library(openxlsx)
+library(readxl)
+```
+
+### Directory pathing
+
+```{r}
+here::i_am("code/02.3_aging_response.irAE.fisher.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+```
+
+### Read RDS files
+
+```{r}
+
+clinical <- readRDS(here("output/RDS files/clinical.rds"))
+
+clinical$irae <- factor(clinical$irae, levels = c("yes","no"))
+
+total_cytof_change <- readRDS(here("output/RDS files/total_cytof_change.rds"))
+
+total_cytof_change_review <- total_cytof_change %>%
+  distinct(`pt id`,`blood timepoint`, .keep_all = TRUE)
+
+cytof_pt_list <- unique(total_cytof_change_review$`pt id`)
+
+```
+
+### Color palettes
+
+```{r}
+colors_bar_response <- c("#00A087FF" ,"#594F4F")
+
+colors_bar_irae <- c("#ffa600", "#594F4F")
+```
+
+
+### Plot symbols
+
+```{r}
+# For >= symbol in strings
+greater_than_equal <- "\u2265"
+less_than <- "\u003c"
+
+age_greater.equal_65 <- paste0("Age ",greater_than_equal,"65")
+
+age_less_65 <- paste0("Age ",less_than,"65")
+```
+
+
+### Data processing
+
+```{r}
+response.age_tibble <- clinical %>%
+  filter(stage =="Advanced/Metastatic") %>%
+  filter(!is.na(orr_character)) %>%
+  mutate(response.status = ifelse(orr_character == "yes", "CR/PR", "SD/PD"))
+```
+
+# Statistics
+
+### Response and age status
+```{r}
+# Fisher
+fisher.response.age.tb <- response.age_tibble %>%
+  select(age65_status, response.status) %>%
+  group_by(age65_status, response.status) %>%
+  summarise(count = n())
+
+fisher.response.age.manual.df <- data.frame("no" = fisher.response.age.tb$count[1:2], 
+                                                 "yes" = fisher.response.age.tb$count[3:4], 
+                                                 row.names = c("CR/PR","SD/PD"))
+
+fisher.test(fisher.response.age.manual.df)
+```
+
+### irAE and age status
+
+```{r}
+# Fisher
+fisher.irae.age.tb <- clinical %>%
+  select(age65_status, irae) %>%
+  group_by(age65_status, irae) %>%
+  summarise(count = n())
+
+fisher.irae.age.manual.df <- data.frame("no" = fisher.irae.age.tb$count[1:2], 
+                                                 "yes" = fisher.irae.age.tb$count[3:4], 
+                                                 row.names = c("irae","no irae")
+                                        )
+
+fisher.test(fisher.irae.age.manual.df)
+```
+
+# Plots (Figure 1)
+
+### Response Stacked Barplot
+
+```{r}
+
+response.age_graph <- response.age_tibble %>%
+  count(response.status, age65_status) %>%
+  group_by(age65_status) %>%
+  mutate(pct= prop.table(n)*100) %>%
+  ggplot() +
+  aes(age65_status, pct, fill = response.status) +
+  scale_fill_manual(name = NULL, values=colors_bar_response, labels = c("Response","No response")) +
+  geom_bar(stat="identity") +
+  ylab("Patients (%)") +
+  geom_text(aes(label=paste0(n, "(",sprintf("%1.1f", pct),"%)")),size = 6, color = "white",
+            position=position_stack(vjust=0.5)) +
+  theme_classic() +
+  labs(#title = "Response by age status", 
+       x = #"Age status",
+       "") +
+  scale_x_discrete(labels = c("Young", "Aged")) +
+  #scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  theme(plot.title = element_text(hjust = 0.75, size = 20), 
+        axis.text.y.left = element_text(angle = 0), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank(),
+        axis.text.y = element_text(color="black", size=20, angle = 90, hjust = 0.5),
+        axis.text.x = element_text(color="black",size=20, angle = 0), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 18) 
+        ) 
+
+print(response.age_graph)
+
+```
+### irAE Stacked Barplot
+
+```{r}
+
+irae.age_graph <- clinical %>%
+  count(irae, age65_status) %>%
+  group_by(age65_status) %>%
+  mutate(pct= prop.table(n)*100) %>%
+  ggplot() +
+  aes(age65_status, pct, fill = irae) +
+  scale_fill_manual(name = NULL, values=colors_bar_irae, labels = c("irAE","No irAE")) +
+  geom_bar(stat="identity") +
+  ylab("Patients (%)") +
+  geom_text(aes(label=paste0(n, "(",sprintf("%1.1f", pct),"%)")),size = 6, color = "white",
+            position=position_stack(vjust=0.5)) +
+  theme_classic() +
+  labs(#title = "irAE by age status", 
+    x = #"Age status",
+       "") +
+  scale_x_discrete(labels = c("Young", "Aged")) +
+  #scale_x_discrete(labels = c(age_less_65, age_greater.equal_65)) +
+  theme(plot.title = element_text(hjust = 0.75, size = 20), 
+        axis.text.y.left = element_text(angle = 0), panel.grid.major = element_blank(), 
+        panel.grid.minor = element_blank(), panel.background = element_blank(),
+        axis.text.y = element_text(color="black", size=20, angle = 90, hjust = 0.5),
+        axis.text.x = element_text(color="black",size=20, angle = 0), 
+        axis.line = element_line(colour = "black"), 
+        axis.title.x = element_text(size = 20), 
+        axis.title.y = element_text(size = 20),
+        legend.title = element_text(size = 20),
+        legend.text = element_text(size = 18) 
+        ) 
+
+print(irae.age_graph)
+
+```
+
+### Plot saving
+
+```{r}
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Stacked_Barplot_Response_age.65.status.pdf"), 
+       plot = response.age_graph, 
+       height = 7, width = 8,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "Stacked_Barplot_irAE_age.65.status.pdf"), 
+       plot = irae.age_graph, 
+       height = 7, width = 6,
+       device = cairo_pdf,
+       dpi = 600)
+
+```
+
+### Generation of supporting data file
+
+```{r}
+aging_response.irae_supporting.data <- clinical %>%
+  select(`pub_id paper`, age65_status, orr_character, irae) %>%
+  rename(`best response` = "orr_character")
+
+write.xlsx(aging_response.irae_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "aging_response.irae.stacked.barplot_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+```

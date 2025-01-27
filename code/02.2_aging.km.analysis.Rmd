@@ -1,0 +1,218 @@
+---
+title: "Time to event analyses"
+output: html_document
+date: "2024-05-23"
+---
+# Set up
+
+### Libraries
+
+```{r}
+library(here)
+library(tidyverse)
+library(survminer)
+library(survival)
+library(grid)
+library(ggbreak) 
+library(ggplot2)
+library(Cairo)
+library(openxlsx)
+library(readxl)
+```
+
+
+### Directory pathing
+
+```{r}
+here::i_am("code/02.2_aging.km.analysis.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+```
+
+### Read RDS files
+
+```{r}
+
+clinical <- readRDS(here("output/RDS files/clinical.rds"))
+
+total_cytokine <- readRDS(here("output/RDS files/total_cytokine.rds"))
+
+total_cohort_cytof_clinical <- readRDS(here("output/RDS files/total_cytof_clinical.rds"))
+
+total_cytof_change <- readRDS(here("output/RDS files/total_cytof_change.rds"))
+
+total_cytof_change_review <- total_cytof_change %>%
+  distinct(`pt id`,`blood timepoint`, .keep_all = TRUE)
+
+cytof_pt_list <- unique(total_cytof_change_review$`pt id`)
+
+```
+
+### Data preparation
+
+```{r}
+
+clinical_tb <- clinical %>%
+  filter(stage == "Advanced/Metastatic")
+
+clinical_tb$age65_status <- factor(clinical_tb$age65_status, levels = c("no", "yes"))
+
+# For >= symbol in strings
+greater_than_equal <- "\u2265"
+less_than <- "\u003c"
+
+age_greater.equal_65 <- paste0("Age ",greater_than_equal,"65")
+
+age_less_65 <- paste0("Age ",less_than,"65")
+
+```
+
+# Plots (Figure 1)
+
+### PFS and OS for age 65 or older
+
+```{r}
+#PFS
+# KM fit for age 65 or older
+KM_fit_pfs_age65 <- surv_fit(Surv(`pfs`, pfs_status) ~ age65_status, data = clinical_tb)
+
+# KM curve
+KM_curve_pfs_age65 <- ggsurvplot(KM_fit_pfs_age65, size = 1.25, font.size = 24, 
+                           risk.table = TRUE, n.risk = FALSE, 
+                           palette = "nejm", 
+                             #c("#00A087FF" ,"#594F4F"),
+                           #c("#ff6361" ,"#003f5c"),
+                           tables.theme = theme_cleantable(),
+                           xlab = "Time (months)", ylab = "PFS (%)",
+                           pval = TRUE, pval.coord = c(9, 0.15), pval.size = 6,
+                           risk.table.font = 6, risk.table.y.text = FALSE, 
+                           risk.table.height = 0.19, break.x.by = 3, break.y.by = .2, xlim = c(0.25, 12), 
+                           ylim = c(-0.05,1.01), axes.offset = TRUE, font.x= c(20), font.y = c(20), 
+                           font.tickslab = 18, risk.table.x.text = 18,
+                           font.legend=c(18, "black"),
+                           legend = c(0.8, 0.8), 
+                           legend.title = "Age status", 
+                           #legend.labs = c(age_less_65,age_greater.equal_65),
+                           legend.labs = c("Young", "Aged"),
+                           surv.scale = 'percent') 
+
+print(KM_curve_pfs_age65)
+
+# OS
+# KM fit for age 65 or older
+KM_fit_os_age65 <- surv_fit(Surv(`os`, os_status_cancer) ~ age65_status, data = clinical_tb)
+
+# KM curve 
+KM_curve_os_age65 <- ggsurvplot(KM_fit_os_age65, size = 1.25, font.size = 24, 
+                           risk.table = TRUE, n.risk = FALSE, 
+                           palette = "nejm", 
+                            # c("#00A087FF" ,"#594F4F"),
+                           #c("#ff6361" ,"#003f5c"),
+                           tables.theme = theme_cleantable(),
+                           xlab = "Time (months)", ylab = "Overall Survival (%)",
+                           pval = TRUE, pval.coord = c(9, 0.9), pval.size = 6,
+                           risk.table.font = 6, risk.table.y.text = FALSE, 
+                           risk.table.height = 0.19, break.x.by = 3, break.y.by = .2, xlim = c(0.25, 12), 
+                           ylim = c(-0.05,1.01), axes.offset = TRUE, font.x= c(20), font.y = c(20), 
+                           font.tickslab = 18, risk.table.x.text = 18,
+                           font.legend=c(18, "black"),
+                           legend = c(0.8, 0.25), 
+                           legend.title = "Age status", 
+                           #legend.labs = c(age_less_65,age_greater.equal_65),
+                           legend.labs = c("Young", "Aged"),
+                           surv.scale = 'percent') 
+
+print(KM_curve_os_age65)
+
+```
+
+### irAE onset
+
+```{r}
+
+# KM fit
+KM_fit_irae_age65 <- surv_fit(Surv(`ae onset`, irae_status) ~ age65_status, data = clinical)
+
+# KM curve total cohort irae incidence
+KM_curve_irae_age65 <- ggsurvplot(KM_fit_irae_age65, size = 1.25, font.size = 24, 
+                       risk.table = TRUE, n.risk = FALSE, 
+                       #palette = c("#EE4266", "#030637"), 
+                       #palette = c("#C901A1", "#030637"),
+                       palette = #c("#BDB2FF", "#030637"),
+                         "nejm",
+                       #c("#ff6361" ,"#003f5c"),
+                       #palette = "#0EAD69",
+                       #palette = "#F49835",
+                       tables.theme = theme_cleantable(),
+                       xlab = "Time (months)", ylab = "Cumulative irAE (%)",
+                       fun = "event",
+                       conf.int = FALSE,
+                       pval = TRUE, pval.coord = c(9, 0.9), pval.size = 6,
+                       risk.table.font = 6, risk.table.y.text = FALSE, 
+                       risk.table.height = 0.19, break.x.by = 3, break.y.by = .2, xlim = c(0.1, 12), 
+                       ylim = c(-0.05,1.01), axes.offset = TRUE, font.x= c(20), font.y = c(20), 
+                       font.tickslab = 18, risk.table.x.text = 18,
+                       font.legend=c(18, "black"),
+                       legend = c(0.18, 0.85), 
+                       legend.title = "Age status", 
+                       #legend.labs = c(age_less_65,age_greater.equal_65),
+                       legend.labs = c("Young", "Aged"),
+                       surv.scale = 'percent') 
+
+print(KM_curve_irae_age65 )
+```
+
+### Plot saving
+
+```{r}
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "KM_PFS_age.65.status.pdf"), 
+       plot = KM_curve_pfs_age65, 
+       height = 7, width = 7,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "KM_OS_age.65.status.pdf"), 
+       plot = KM_curve_os_age65, 
+       height = 7, width = 7,
+       device = cairo_pdf,
+       dpi = 600)
+
+ggsave(filename = paste0(output.path.pdf, "/", Sys.Date(), "_", "KM_irae_age.65.status.pdf"), 
+       plot = KM_curve_irae_age65, 
+       height = 7, width = 7,
+       device = cairo_pdf,
+       dpi = 600)
+
+```
+
+### Generation of supporting data file
+
+```{r}
+
+clinical_km_supporting.file <- clinical %>%
+  select(`pub_id paper`, age65_status,
+         pfs, pfs_status,
+         os, os_status,
+         `ae onset`, irae_status)
+
+write.xlsx(clinical_km_supporting.file, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "clinical_km.analysis_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+
+```

@@ -1,0 +1,378 @@
+---
+title: "CyTOF Marker Heatmap"
+output: html_document
+date: "2024-05-23"
+---
+# Set up
+
+### Libraries
+
+```{r include = FALSE}
+# Libraries
+library(here)
+library(tidyverse)
+library(ggplot2)
+library(pheatmap)
+library(viridis)
+library(ggpubr)
+library(gridExtra)
+library(grid)
+library(ggbreak) 
+library(ggsci)
+library(ComplexHeatmap)
+library(khroma)
+library(greekLetters)
+library(Cairo)
+library(RColorBrewer)
+library(readxl)
+library(circlize)
+library(openxlsx)
+library(NatParksPalettes)
+
+```
+
+### Directory pathing
+
+```{r}
+here::i_am("code/02.7_aging_cytof.marker_heatmaps.Rmd")
+
+output.path.rds <- here("output/RDS files")
+if (!dir.exists(here(output.path.rds))) dir.create(here(output.path.rds))
+
+output.path.excel <- here("output/Excel files")
+if (!dir.exists(here(output.path.excel))) dir.create(here(output.path.excel))
+
+output.path.figure_files <- here("output/Figure files")
+if (!dir.exists(here(output.path.figure_files))) dir.create(here(output.path.figure_files))
+
+output.path.tiff <- here("output/Figure files/Tiff files")
+if (!dir.exists(here(output.path.tiff))) dir.create(here(output.path.tiff))
+
+output.path.svg <- here("output/Figure files/SVG files")
+if (!dir.exists(here(output.path.svg))) dir.create(here(output.path.svg))
+
+output.path.pdf <- here("output/Figure files/PDF files")
+if (!dir.exists(here(output.path.pdf))) dir.create(here(output.path.pdf))
+
+```
+
+### Import files
+
+```{r}
+
+clinical<- readRDS(here("output/RDS files/clinical.rds"))
+
+clinical$orr.age.status <- factor(clinical$orr.age.status, 
+                                                levels = c("RY", "NRY",
+                                                           "RO", "NRO"))
+
+file_path_v1 <- here("data/CyTOF/V1_Functional_Marker_Expression.xlsx")
+cytof.marker.tb_import_v1 <- read_excel(file_path_v1)
+
+```
+
+### Data cleaning
+
+```{r}
+
+# version 1 clustering
+cytof.marker.tb_v1 <- cytof.marker.tb_import_v1 %>%
+  filter(!sample_id == "15_0") %>%
+  mutate(sample_id = ifelse(sample_id == "15_0_1", "15_0", sample_id)) %>%
+  mutate(`pt id` = sub("^(\\d+)_.*", "\\1",`sample_id`)) %>%
+  mutate(`pt id` = as.numeric(`pt id`)) %>%
+  mutate(`timepoint` = sub(".*_", "\\1",`sample_id`)) %>%
+  mutate(`timepoint` = as.numeric(`timepoint`)) %>%
+  relocate(`pt id`, .before = cluster) %>%
+  rename(immune_cell = "cluster", marker = "variable", mmi = "value") 
+
+change_cytof.marker.tb_v1 <- cytof.marker.tb_v1 %>%
+  group_by(`pt id`,`immune_cell`,`marker`) %>%
+  arrange(`pt id`,`immune_cell`,`marker`,`timepoint`) %>%
+  mutate(baseline_mmi = mmi[row_number() ==1],
+         delta = mmi - mmi[row_number() == 1],
+         relative_change = (mmi - mmi[row_number() == 1])/mmi[row_number() == 1],
+         fold = mmi/mmi[row_number() == 1],
+         fold_log2 = log2(fold)) %>%
+  filter(!`timepoint` == 0) %>%
+  relocate(baseline_mmi:fold, .after = mmi) %>%
+  ungroup()
+
+```
+
+### Combining files
+
+```{r}
+
+# v1 clustering
+
+clinical_cytof.marker_tb_v1 <- clinical %>%
+  left_join(cytof.marker.tb_v1, by = "pt id") %>%
+  mutate(`blood timepoint` = case_when(timepoint == 0 ~ "baseline",
+                                       timepoint == 1 ~ "on treatment",
+                                       TRUE ~ NA_character_))
+
+clinical_cytof.change_tb_v1 <- clinical %>%
+  left_join(change_cytof.marker.tb_v1, by = "pt id") %>%
+  mutate(`blood timepoint` = case_when(timepoint == 0 ~ "baseline",
+                                       timepoint == 1 ~ "on treatment",
+                                       TRUE ~ NA_character_))
+
+```
+
+### Cytof cluster lists (grouped)
+
+```{r}
+
+cytof_cluster_grouped_list <- unique(clinical_cytof.marker_tb_v1$immune_cell)
+cytof_cluster_grouped_list_rmv_UA <- cytof_cluster_grouped_list[-16]
+
+```
+
+### Baseline and on treatment tibbles (grouped clustering version 1)
+
+```{r}
+# baseline tibble
+clinical_cytof.marker_baseline_v1 <- clinical_cytof.marker_tb_v1 %>%
+  filter(timepoint == 0) %>%
+  group_by(immune_cell, marker, age65_status) %>%
+  mutate(mean_age.status_immune.group_marker = mean(mmi)) %>%
+  group_by(immune_cell, marker) %>%
+  mutate(mean_immune.group_marker = mean(mmi),
+         sd_immune.group_marker = sd(mmi)) %>%
+  ungroup() %>%
+  mutate(zscore_pt = (mmi-mean_immune.group_marker)/sd_immune.group_marker) %>%
+  group_by(immune_cell, marker, age65_status) %>% 
+  mutate(mean_zscore = mean(zscore_pt))
+
+# first timepoint tibble
+clinical_cytof.marker_on.treatment_v1 <- clinical_cytof.marker_tb_v1 %>%
+  filter(timepoint == 1) %>%
+  group_by(immune_cell, marker, age65_status) %>%
+  mutate(mean_age.status_immune.group_marker = mean(mmi)) %>%
+  group_by(immune_cell, marker) %>%
+  mutate(mean_immune.group_marker = mean(mmi),
+         sd_immune.group_marker = sd(mmi)) %>%
+  ungroup() %>%
+  mutate(zscore_pt = (mmi-mean_immune.group_marker)/sd_immune.group_marker) %>%
+  group_by(immune_cell, marker, age65_status) %>% 
+  mutate(mean_zscore = mean(zscore_pt))
+
+# baseline and first timepoint tibble
+clinical_cytof.marker_baseline.ontreatment_v1 <- clinical_cytof.marker_tb_v1 %>%
+  filter(timepoint %in% c(0,1)) %>%
+  group_by(immune_cell, marker, age65_status) %>%
+  mutate(mean_age.status_immune.group_marker = mean(mmi)) %>%
+  group_by(timepoint,immune_cell, marker) %>%
+  mutate(mean_immune.group_marker = mean(mmi),
+         sd_immune.group_marker = sd(mmi)) %>%
+  ungroup() %>%
+  mutate(zscore_pt = (mmi-mean_immune.group_marker)/sd_immune.group_marker) %>%
+  group_by(timepoint,immune_cell, marker, age65_status) %>% 
+  mutate(mean_zscore = mean(zscore_pt))
+
+```
+
+### Special characters for graphs
+
+```{r}
+# For >= symbol in strings
+greater_than_equal <- "\u2265"
+less_than <- "\u003c"
+
+age_greater.equal_65 <- paste0("Age ",greater_than_equal,"65")
+
+age_less_65 <- paste0("Age ",less_than,"65")
+
+```
+
+### Color palettes
+
+```{r}
+colors_npg <- pal_npg()(10)
+
+colors_anno_label_heatmap <- c("#544667","#C37672","#F49835","#4AB8A7","#284B96","#878787")
+
+color_pal_custom <- c(#"#84D7E199","#8A419899","#FF95A899",
+  #"#374E56FF","#DF8F46FF","#00A1D5FF",
+  #"#003049","#0a9396","#94d2bd","#ffb703","#f77100","#d62826",
+  #"#000181",
+  #"#1974D3",
+  "#219ebc","#023047","#ffb703",
+  "#d1495b","#edae49","#00798c",
+  "#001219",
+  #"#005f73",
+  "#0a9396",
+  #"#e9d8a6",
+  "#ee9b00",
+  "#53ccec",
+  #"#F2C858",
+  "#F54952","#3A0751",
+  "#422680","#280659","#FC666F"
+  )
+
+```
+
+### Annotation label for clusters individually
+
+```{r}
+
+total_anno_tb_individual  <- tibble(`Marker status` = c("memory","memory","memory",
+                                                           "cytotoxicity","cytotoxicity","cytotoxicity",
+                                    rep("exhaustion",6)))
+
+total_anno_cols_individual <- list(`Marker status` = 
+                        c(`memory` = color_pal_custom[1],
+                          `cytotoxicity` = color_pal_custom[2],
+                          `exhaustion` = color_pal_custom[3])
+                      )
+
+total_anno_individual <- HeatmapAnnotation(df= total_anno_tb_individual,
+                            which = 'col',
+                            col = total_anno_cols_individual,
+                            annotation_width = unit(c(1,4), 'cm'),
+                            show_annotation_name = FALSE,
+                            #annotation_name_side = "right",
+                            gap = unit(1, 'mm'),
+                            annotation_legend_param = list(
+                              `Marker status` = list(title_gp = gpar(fontface = "plain"), labels_gp = gpar(fontsize = 12),
+                                                    labels = c("Effector function/proliferation",
+                                                               "Exhaustion","Memory"),
+                                                    direction = "horizontal"
+                                                 )),
+                              border = TRUE
+                              ) 
+
+```
+
+### Markers to use
+
+```{r}
+select_markers <- c("CCR7","CD45RA","CD45RO",
+                    "GZMB","KI67","TBET",
+                    "CTLA4","LAG3","PD1","PDL1",
+                    "TIGIT", "TIM3")
+```
+
+# Plots
+
+### For loop for heatmaps (Figure 5 and Ext Data Figure 4)
+
+```{r}
+
+col_fun_fixed = colorRamp2(seq(from = -0.5, to = 0.5, by = 0.25), c("#023047","#219ebc","white", "#db504a", "#9b2226"))
+
+# generate empty lists
+baseline_plot_list <- list()
+on.treatment_plot_list <- list()
+
+#extract immune group col names prior to making dataframe
+
+age65.group_names_v1 <- c("Young","Aged")
+
+for (i in 1:length(cytof_cluster_grouped_list_rmv_UA)) {
+  
+  baseline_wide_cytof.marker_df <- clinical_cytof.marker_baseline.ontreatment_v1 %>%
+    filter(timepoint == 0) %>%
+    distinct(immune_cell, marker, age65_status, .keep_all = TRUE) %>%
+    select(immune_cell,age65_status,mean_zscore,`marker`, mean_age.status_immune.group_marker, mean_immune.group_marker, sd_immune.group_marker) %>%
+    group_by(marker) %>%
+    filter(immune_cell == paste(cytof_cluster_grouped_list_rmv_UA[i])) %>%
+    filter(marker %in% select_markers) %>%
+    arrange(match(marker, select_markers)) %>%
+    ungroup() %>%
+    select(age65_status,`marker`, mean_zscore) %>%
+    mutate(age65_status = ifelse(age65_status == "yes", "Aged", "Young")) %>%
+    arrange(desc(age65_status)) %>%
+    pivot_wider(names_from = marker, values_from = mean_zscore) 
+  
+  
+  baseline_heat_df <- as.matrix(
+  baseline_wide_cytof.marker_df[,2:ncol(baseline_wide_cytof.marker_df)])
+  
+  row.names(baseline_heat_df) <- age65.group_names_v1
+  
+  on.treatment_wide_cytof.marker_df <- clinical_cytof.marker_baseline.ontreatment_v1 %>%
+    filter(timepoint == 1) %>%
+    distinct(immune_cell, marker, age65_status, .keep_all = TRUE) %>%
+    select(immune_cell,age65_status,mean_zscore,`marker`, mean_age.status_immune.group_marker, mean_immune.group_marker, sd_immune.group_marker) %>%
+    group_by(marker) %>%
+    filter(immune_cell == paste(cytof_cluster_grouped_list_rmv_UA[i])) %>%
+    filter(marker %in% select_markers) %>%
+    arrange(match(marker, select_markers)) %>%
+    ungroup() %>%
+    select(age65_status,`marker`, mean_zscore) %>%
+    mutate(age65_status = ifelse(age65_status == "yes", "Aged", "Young")) %>%
+    arrange(desc(age65_status)) %>%
+    pivot_wider(names_from = marker, values_from = mean_zscore) 
+  
+  max_on.treatment_normalized.mmi <- round(max(on.treatment_wide_cytof.marker_df[,-1]),1)
+  
+  on.treatment_heat_df <- as.matrix(
+  on.treatment_wide_cytof.marker_df[,2:ncol(on.treatment_wide_cytof.marker_df)])
+  
+  row.names(on.treatment_heat_df) <- age65.group_names_v1
+  
+  total_heat_df <- rbind(baseline_heat_df,on.treatment_heat_df)
+  
+  row_split <- factor(c("Baseline","Baseline","On treatment","On treatment"), levels = c("Baseline","On treatment"))
+  
+  total_heatmap <- Heatmap(total_heat_df,
+                                  col = col_fun_fixed,
+                                  heatmap_legend_param = list(title = "Average \nscaled MMI",
+                                                              title_gp = gpar(fontface = "plain"),
+                                                              direction = "horizontal"
+                                                              ),
+                                  column_title = paste(cytof_cluster_grouped_list_rmv_UA[i]),
+                                  column_title_side = "top",
+                                  column_title_gp = gpar(fontsize = 14),
+                                  column_names_rot = 45,
+                                  column_names_gp = gpar(fontsize = 10),
+                                  row_title_rot = 0,
+                                  row_title_gp = gpar(fontsize = 14), 
+                                  row_split = row_split,
+                                  row_names_side = "right",
+                                  show_row_names = TRUE,
+                                  cluster_rows = FALSE, 
+                                  cluster_columns = FALSE,
+                                  top_annotation= total_anno_individual,
+                                  border_gp = gpar(col = "black", lty = 1, lwd = 2),
+                                  rect_gp = gpar(col = "black", lwd = 2),
+                                  )
+  
+  print(paste(cytof_cluster_grouped_list_rmv_UA[i]))
+  
+  cairo_pdf(file = paste0(output.path.pdf, "/", Sys.Date(), "_", paste(cytof_cluster_grouped_list_rmv_UA[i]), "_total__marker_version1_heatmap.pdf"),
+     height = 5, width = 8)
+  
+  draw(total_heatmap, row_gap = unit(3, "mm"), merge_legend = TRUE,ht_gap = unit(7, "mm"),annotation_legend_side = "right", heatmap_legend_side = "bottom",
+     auto_adjust = TRUE)
+  
+  dev.off()
+}
+```
+
+### Generation of supporting data file
+
+```{r}
+
+cytof.marker_heatmap_supporting.data <- clinical_cytof.marker_baseline.ontreatment_v1 %>%
+  filter(marker %in% select_markers) %>%
+  select(timepoint,age65_status, immune_cell, marker, mean_zscore) %>%
+  mutate(age65_status = str_to_title(age65_status),
+         timepoint = ifelse(timepoint == "0", "Baseline", "On treatment")) %>%
+  ungroup() %>%
+  distinct(timepoint,age65_status, immune_cell, marker, .keep_all = TRUE) %>%
+  arrange(match(marker, select_markers)) %>%
+  pivot_wider(names_from = marker, values_from = mean_zscore) %>%
+  arrange(timepoint, immune_cell) %>%
+  rename(`Immune cluster` = "immune_cell",
+         `Aged status` = "age65_status",
+         `Timepoint` = "timepoint")
+
+
+write.xlsx(cytof.marker_heatmap_supporting.data, 
+           file = here(output.path.excel, paste0(Sys.Date(), "_", "cytof.marker_avg.zscore_grouped.cluster_heatmpas_supporting.data.xlsx")), colNames = TRUE, rowNames = FALSE, append = FALSE)
+```
+
+
